@@ -29,6 +29,14 @@ export async function POST(request: NextRequest) {
   // API response shape. We only act on ones that look like a transaction
   // (have an id + state) — other Wallets resource types aren't relevant yet.
   if (resource?.id && resource?.state) {
+    // networkFeeInUSD is only present once Circle knows the actual cost
+    // (i.e. once the transfer has gone on-chain), not at creation — this is
+    // claimIT's real gas cost for the payout, tracked for internal
+    // accounting only; it's never deducted from what the recipient receives.
+    const gasFeeMicros = resource.networkFeeInUSD
+      ? BigInt(Math.round(Number(resource.networkFeeInUSD) * 1_000_000))
+      : undefined;
+
     // Idempotent by construction: this always writes the notification's
     // current state rather than incrementing/appending anything, so
     // Circle's at-least-once delivery (possible duplicate notificationIds)
@@ -38,6 +46,7 @@ export async function POST(request: NextRequest) {
       data: {
         status: resource.state,
         rawWebhook: event,
+        ...(gasFeeMicros !== undefined ? { gasFeeMicros } : {}),
       },
     });
   }

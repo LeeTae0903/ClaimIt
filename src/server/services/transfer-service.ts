@@ -9,13 +9,6 @@ import { circleUserClient } from "@/lib/circle/user-wallets";
 // USDC model.
 const ARC_USDC_ADDRESS = "0x3600000000000000000000000000000000000000";
 
-// Flat deduction matching Arc's documented ~$0.01/tx stable-fee target
-// (EIP-1559 + EWMA smoothing keeps this predictable). A dynamic estimate via
-// estimateTransferFee would be more precise but makes the amount the
-// recipient sees non-deterministic; this trades some precision for a simple,
-// predictable "you receive amount minus a flat network fee" guarantee.
-export const GAS_FEE_MICROS = 10_000n; // $0.01
-
 function microsToDecimalString(micros: bigint): string {
   const whole = micros / 1_000_000n;
   const frac = (micros % 1_000_000n).toString().padStart(6, "0");
@@ -25,8 +18,17 @@ function microsToDecimalString(micros: bigint): string {
 /**
  * Backend-only transfer from a treasury wallet to a recipient address — no
  * client interaction required, since the treasury is developer-controlled.
- * This is what a claim payout actually calls. Deducts the flat gas fee from
- * the escrowed amount before sending.
+ * This is what a claim payout actually calls.
+ *
+ * The recipient always receives the full escrowed amount. Gas for this
+ * transfer is paid automatically by the treasury wallet itself, separate
+ * from the transfer amount (that's just how gas works on Arc/EVM — the
+ * signing wallet pays it, not the recipient) — so this is claimIT's
+ * operating cost, not something deducted from what the recipient gets. The
+ * real cost is tiny (measured ~$0.002–0.01 per transfer in testing) and
+ * gets recorded into gasFeeMicros later, once the webhook reports the
+ * completed transaction's actual networkFeeInUSD — it isn't knowable at
+ * creation time.
  */
 export async function payoutFromTreasury({
   paymentLinkId,
@@ -39,13 +41,6 @@ export async function payoutFromTreasury({
   toAddress: string;
   amountMicros: bigint;
 }) {
-  if (amountMicros <= GAS_FEE_MICROS) {
-    throw new Error(
-      `Amount ${amountMicros} is too small to cover the ${GAS_FEE_MICROS} gas fee`,
-    );
-  }
-  const netAmountMicros = amountMicros - GAS_FEE_MICROS;
-
   const treasuryWallet = await db.wallet.findUniqueOrThrow({
     where: { circleWalletId: treasuryCircleWalletId },
   });
@@ -59,7 +54,7 @@ export async function payoutFromTreasury({
     blockchain: Blockchain.ArcTestnet,
     tokenAddress: ARC_USDC_ADDRESS,
     destinationAddress: toAddress,
-    amount: [microsToDecimalString(netAmountMicros)],
+    amount: [microsToDecimalString(amountMicros)],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
     idempotencyKey: randomUUID(),
   });
@@ -73,13 +68,12 @@ export async function payoutFromTreasury({
       circleTxId,
       fromAddress: treasuryWallet.address,
       toAddress,
-      amountMicros: netAmountMicros,
-      gasFeeMicros: GAS_FEE_MICROS,
+      amountMicros,
       status: "INITIATED",
     },
   });
 
-  return { circleTxId, netAmountMicros };
+  return { circleTxId };
 }
 
 /**
