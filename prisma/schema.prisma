@@ -1,4 +1,9 @@
 // claimIT database schema.
+// Auth tables (User/Session/Account/Verification) are owned by Better Auth —
+// shape and field names come from its own schema generator
+// (`npx auth@latest generate`), not hand-written. Re-run that generator
+// after changing plugins/providers in src/lib/auth.ts, then reconcile here.
+//
 // Escrow model: pooled treasury wallets (Circle Developer-Controlled) + this
 // ledger, rather than one on-chain wallet per link. See architecture notes
 // for the double-spend/duplicate-claim guarantees this schema enforces.
@@ -13,61 +18,77 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String?   @unique
-  emailVerified DateTime?
-  name          String?
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
   image         String?
-  isGuest       Boolean   @default(false)
-  circleUserId  String    @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  isAnonymous   Boolean?  @default(false)
+  sessions      Session[]
+  accounts      Account[]
 
-  accounts  Account[]
-  sessions  Session[]
-  wallets   Wallet[]
-  sentLinks PaymentLink[] @relation("SentLinks")
-  claims    Claim[]
-  auditLogs AuditLog[]
-}
+  // claimIT domain fields/relations (not part of Better Auth's core schema).
+  // Nullable: Better Auth creates the User row on sign-up/sign-in and knows
+  // nothing about Circle. A Circle wallet is provisioned and backfilled here
+  // right after, via a Better Auth database hook (see Milestone 4).
+  circleUserId String?       @unique
+  wallets      Wallet[]
+  sentLinks    PaymentLink[] @relation("SentLinks")
+  claims       Claim[]
+  auditLogs    AuditLog[]
 
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String?
-  session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-  @@index([userId])
+  @@unique([email])
+  @@map("user")
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  @@unique([token])
   @@index([userId])
+  @@map("session")
 }
 
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  @@unique([identifier, token])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }
 
 enum CustodyType {
