@@ -17,6 +17,7 @@
  *   npx tsx scripts/register-entity-secret.ts
  */
 import "dotenv/config";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -41,20 +42,21 @@ async function main() {
     throw new Error("CIRCLE_API_KEY is required to register the entity secret.");
   }
 
-  const recoveryFileDownloadPath = path.join(
-    os.homedir(),
-    ".circle",
-    "claimit-recovery-file.json",
-  );
+  // The SDK treats this as a directory, not a file path — it writes its own
+  // auto-named recovery_file_<uuid>.dat inside it (the reference doc's
+  // filename-shaped example path was misleading; confirmed against the
+  // installed package's actual behavior).
+  const recoveryFileDir = path.join(os.homedir(), ".circle");
+  fs.mkdirSync(recoveryFileDir, { recursive: true });
 
   const response = await registerEntitySecretCiphertext({
     apiKey,
     entitySecret,
-    recoveryFileDownloadPath,
+    recoveryFileDownloadPath: recoveryFileDir,
   });
 
   console.log("Entity secret registered.");
-  console.log("Recovery file written to:", recoveryFileDownloadPath);
+  console.log("Recovery file written inside:", recoveryFileDir);
   console.log(
     "Store that file somewhere secure outside this repo — it cannot be re-downloaded.",
   );
