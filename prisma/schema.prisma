@@ -1,0 +1,193 @@
+// claimIT database schema.
+// Escrow model: pooled treasury wallets (Circle Developer-Controlled) + this
+// ledger, rather than one on-chain wallet per link. See architecture notes
+// for the double-spend/duplicate-claim guarantees this schema enforces.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  isGuest       Boolean   @default(false)
+  circleUserId  String    @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  wallets   Wallet[]
+  sentLinks PaymentLink[] @relation("SentLinks")
+  claims    Claim[]
+  auditLogs AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+enum CustodyType {
+  USER_CONTROLLED
+  DEVELOPER_CONTROLLED
+}
+
+enum WalletRole {
+  PERSONAL
+  TREASURY
+}
+
+model Wallet {
+  id             String      @id @default(cuid())
+  userId         String?
+  custodyType    CustodyType
+  role           WalletRole
+  circleWalletId String      @unique
+  address        String      @unique
+  blockchain     String      @default("ARC-TESTNET")
+  accountType    String
+  walletSetId    String?
+  createdAt      DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([role])
+}
+
+enum LinkStatus {
+  ACTIVE
+  CLAIMED
+  EXPIRED
+  CANCELLED
+}
+
+model PaymentLink {
+  id               String     @id @default(cuid())
+  tokenHash        String     @unique
+  senderId         String
+  treasuryWalletId String
+  amountMicros     BigInt
+  status           LinkStatus @default(ACTIVE)
+  passwordHash     String?
+  expiresAt        DateTime?
+  depositTxId      String?
+  createdAt        DateTime   @default(now())
+  claimedAt        DateTime?
+
+  sender       User          @relation("SentLinks", fields: [senderId], references: [id])
+  claim        Claim?
+  transactions Transaction[]
+
+  @@index([senderId])
+  @@index([status, expiresAt])
+}
+
+enum ClaimStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model Claim {
+  id            String      @id @default(cuid())
+  paymentLinkId String      @unique
+  claimantId    String
+  status        ClaimStatus @default(PENDING)
+  circleTxId    String?
+  failReason    String?
+  ipAddress     String
+  userAgent     String?
+  createdAt     DateTime    @default(now())
+
+  paymentLink PaymentLink @relation(fields: [paymentLinkId], references: [id])
+  claimant    User        @relation(fields: [claimantId], references: [id])
+
+  @@index([claimantId])
+}
+
+enum TxType {
+  DEPOSIT
+  PAYOUT
+  REFUND
+}
+
+model Transaction {
+  id            String   @id @default(cuid())
+  paymentLinkId String
+  type          TxType
+  circleTxId    String   @unique
+  fromAddress   String
+  toAddress     String
+  amountMicros  BigInt
+  gasFeeMicros  BigInt?
+  status        String
+  rawWebhook    Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  paymentLink PaymentLink @relation(fields: [paymentLinkId], references: [id])
+
+  @@index([paymentLinkId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [actorId], references: [id])
+
+  @@index([targetType, targetId])
+  @@index([actorId])
+}
