@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 
 type WalletInfo = { id: string; address: string; blockchain: string };
@@ -15,7 +16,8 @@ type EnsureResponse =
       circleAppId: string;
     };
 
-export function WalletSetup() {
+export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
+  const router = useRouter();
   const [state, setState] = useState<
     | { phase: "loading" }
     | { phase: "ready"; wallets: WalletInfo[] }
@@ -24,7 +26,18 @@ export function WalletSetup() {
     | { phase: "error"; message: string }
   >({ phase: "loading" });
 
+  // Guards against React Strict Mode's dev-only double-invocation of
+  // effects: without this, POST /api/wallet/ensure fires twice in quick
+  // succession, and the second call loses a genuine race against Circle's
+  // API (both read circleUserId as not-yet-set and try to create the same
+  // user). Refs persist across Strict Mode's mount/cleanup/remount cycle
+  // for the same component instance, so this reliably runs ensure() once.
+  const hasStartedRef = useRef(false);
+
   useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
     let cancelled = false;
 
     async function ensure() {
@@ -105,13 +118,24 @@ export function WalletSetup() {
 
   if (state.phase === "ready") {
     return (
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Wallet ready</p>
-        {state.wallets.map((w) => (
-          <p key={w.id} className="font-mono text-xs text-black/60 dark:text-white/60">
-            {w.blockchain}: {w.address}
-          </p>
-        ))}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Wallet ready</p>
+          {state.wallets.map((w) => (
+            <p key={w.id} className="font-mono text-xs text-black/60 dark:text-white/60">
+              {w.blockchain}: {w.address}
+            </p>
+          ))}
+        </div>
+        {redirectTo && (
+          <button
+            type="button"
+            onClick={() => router.push(redirectTo)}
+            className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] dark:bg-white dark:text-black"
+          >
+            Continue
+          </button>
+        )}
       </div>
     );
   }

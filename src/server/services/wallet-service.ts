@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { Blockchain, Error155106 } from "@circle-fin/user-controlled-wallets";
+import {
+  Blockchain,
+  Error155101,
+  Error155106,
+} from "@circle-fin/user-controlled-wallets";
 import { db } from "@/lib/db";
 import { circleUserClient } from "@/lib/circle/user-wallets";
 
@@ -21,9 +25,16 @@ async function ensureCircleUser(appUserId: string, circleUserId: string | null) 
   try {
     await circleUserClient.createUser({ userId: appUserId });
   } catch (err) {
-    // Already exists from a prior attempt that didn't finish backfilling
-    // circleUserId on our side — safe to continue.
-    if (!(err instanceof Error155106)) throw err;
+    // Error155101 ("user already exists") happens on genuine retries, and
+    // also reliably under React Strict Mode in dev, which double-invokes
+    // effects — two near-simultaneous ensure() calls can both read
+    // circleUserId as null before either commits, so the second createUser
+    // call always loses this race. Error155106 is the equivalent case one
+    // step later, thrown by wallet initialization instead of user creation.
+    // Both just mean "Circle already has this user" — safe to continue.
+    if (!(err instanceof Error155101) && !(err instanceof Error155106)) {
+      throw err;
+    }
   }
 
   await db.user.update({
