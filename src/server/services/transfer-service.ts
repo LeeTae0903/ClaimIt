@@ -120,22 +120,19 @@ export async function createDepositChallenge({
 /**
  * Called after the client-side challenge from createDepositChallenge
  * succeeds. Finds the resulting transaction by refId (there's no other
- * shared key between a challenge and the transaction it produces) and
- * records it.
+ * shared key between a challenge and the transaction it produces) — read
+ * only, no DB write, so callers that need to create a dependent row (e.g. a
+ * PaymentLink) first can do so using this result as the source of truth for
+ * the actual on-chain amount before recording the transaction itself via
+ * recordTransaction.
  */
-export async function confirmDeposit({
-  paymentLinkId,
+export async function findDepositTransaction({
   userToken,
   fromWalletId,
-  fromAddress,
-  treasuryAddress,
   refId,
 }: {
-  paymentLinkId: string;
   userToken: string;
   fromWalletId: string;
-  fromAddress: string;
-  treasuryAddress: string;
   refId: string;
 }) {
   const response = await circleUserClient.listTransactions({
@@ -152,19 +149,23 @@ export async function confirmDeposit({
     );
   }
 
-  await db.transaction.create({
-    data: {
-      paymentLinkId,
-      type: "DEPOSIT",
-      circleTxId: transaction.id,
-      fromAddress,
-      toAddress: treasuryAddress,
-      amountMicros: BigInt(
-        Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
-      ),
-      status: transaction.state,
-    },
-  });
+  return {
+    circleTxId: transaction.id,
+    state: transaction.state,
+    amountMicros: BigInt(
+      Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
+    ),
+  };
+}
 
-  return { circleTxId: transaction.id, state: transaction.state };
+export async function recordTransaction(data: {
+  paymentLinkId: string;
+  type: "DEPOSIT" | "PAYOUT" | "REFUND";
+  circleTxId: string;
+  fromAddress: string;
+  toAddress: string;
+  amountMicros: bigint;
+  status: string;
+}) {
+  return db.transaction.create({ data });
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { confirmUserWallet } from "@/server/services/wallet-service";
+import { confirmLinkDeposit } from "@/server/services/payment-link-service";
 import { clearUserTokenCookie, getUserTokenCookie } from "@/lib/circle/user-token-cookie";
+import { clearDraftCookie, getDraftCookie } from "@/lib/payment-link-draft-cookie";
 
 export async function POST(request: NextRequest) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -10,16 +11,22 @@ export async function POST(request: NextRequest) {
   }
 
   const userToken = getUserTokenCookie(request);
-  if (!userToken) {
+  const draft = getDraftCookie(request);
+  if (!userToken || !draft) {
     return NextResponse.json(
-      { error: "No pending wallet setup for this session" },
+      { error: "No pending link for this session" },
       { status: 400 },
     );
   }
 
-  const wallets = await confirmUserWallet({ id: session.user.id }, userToken);
+  const result = await confirmLinkDeposit({
+    senderId: session.user.id,
+    userToken,
+    draft,
+  });
 
-  const response = NextResponse.json({ wallets });
+  const response = NextResponse.json(result);
   clearUserTokenCookie(response);
+  clearDraftCookie(response);
   return response;
 }

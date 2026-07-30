@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ensureUserWallet } from "@/server/services/wallet-service";
-
-const USER_TOKEN_COOKIE = "circle_user_token";
+import { setUserTokenCookie } from "@/lib/circle/user-token-cookie";
 
 export async function POST(request: NextRequest) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -36,13 +35,7 @@ export async function POST(request: NextRequest) {
     circleAppId: process.env.NEXT_PUBLIC_CIRCLE_APP_ID,
   });
 
-  response.cookies.set(USER_TOKEN_COOKIE, result.userToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 55 * 60,
-  });
+  setUserTokenCookie(response, result.userToken);
 
   return response;
 }
