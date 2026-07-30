@@ -6,7 +6,6 @@ import {
   prepareLinkDeposit,
 } from "@/server/services/payment-link-service";
 import { setUserTokenCookie } from "@/lib/circle/user-token-cookie";
-import { setDraftCookie } from "@/lib/payment-link-draft-cookie";
 
 export async function POST(request: NextRequest) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -33,7 +32,7 @@ export async function POST(request: NextRequest) {
       : null;
 
   try {
-    const { challengeId, userToken, encryptionKey, rawToken, draft } =
+    const { linkId, challengeId, userToken, encryptionKey, rawToken } =
       await prepareLinkDeposit({
         senderId: session.user.id,
         amountMicros,
@@ -42,6 +41,7 @@ export async function POST(request: NextRequest) {
       });
 
     const response = NextResponse.json({
+      linkId,
       challengeId,
       // Needed once, immediately, for this render's sdk.execute() call —
       // same rule as wallet setup: not persisted client-side, the httpOnly
@@ -52,7 +52,6 @@ export async function POST(request: NextRequest) {
       circleAppId: process.env.NEXT_PUBLIC_CIRCLE_APP_ID,
     });
     setUserTokenCookie(response, userToken);
-    setDraftCookie(response, draft);
     return response;
   } catch (err) {
     if (err instanceof NoWalletError) {

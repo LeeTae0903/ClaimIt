@@ -3,10 +3,10 @@ import { circleUserClient } from "@/lib/circle/user-wallets";
 import {
   createDepositChallenge,
   findDepositTransaction,
-  recordTransaction,
+  recordTransactionIdempotent,
+  DepositNotIndexedYetError,
 } from "@/server/services/transfer-service";
 import { generateClaimToken, hashClaimToken } from "@/lib/claim-token";
-import type { PendingLinkDraft } from "@/lib/payment-link-draft-cookie";
 
 export const MIN_LINK_AMOUNT_MICROS = 100_000n; // $0.10 — keeps gas cost from dominating tiny links
 
@@ -17,11 +17,29 @@ export class NoWalletError extends Error {
   }
 }
 
+export class LinkNotFoundError extends Error {
+  constructor() {
+    super("Payment link not found.");
+    this.name = "LinkNotFoundError";
+  }
+}
+
+export class LinkOwnershipError extends Error {
+  constructor() {
+    super("This payment link doesn't belong to the current session.");
+    this.name = "LinkOwnershipError";
+  }
+}
+
 /**
- * Creates the Circle deposit challenge for a new payment link. Nothing is
- * written to PaymentLink/Transaction here — see the draft cookie module for
- * why (mirrors the ensure/confirm pattern from wallet creation: no DB state
- * until the client-side challenge actually succeeds).
+ * Creates the Circle deposit challenge for a new payment link, then
+ * *immediately* persists the PaymentLink as PENDING_DEPOSIT — before the
+ * response even reaches the client, i.e. before the user can possibly
+ * authorize the on-chain transfer. This is the safety net: if the
+ * synchronous confirm step never completes (crash, closed tab, exhausted
+ * retries), the row still exists with everything needed (refId,
+ * passwordHash, expiresAt, treasuryWalletId) for the reconciliation job to
+ * pick up later. Nothing here depends on a cookie surviving.
  */
 export async function prepareLinkDeposit({
   senderId,
@@ -65,64 +83,172 @@ export async function prepareLinkDeposit({
 
   const rawToken = generateClaimToken();
 
-  const draft: PendingLinkDraft = {
-    tokenHash: hashClaimToken(rawToken),
-    requestedAmountMicros: amountMicros.toString(),
-    passwordHash,
-    expiresAt: expiresAt ? expiresAt.toISOString() : null,
-    treasuryWalletId: treasury.id,
-    treasuryAddress: treasury.address,
-    senderWalletId: senderWallet.circleWalletId,
-    senderWalletAddress: senderWallet.address,
-    refId,
-  };
-
-  return { challengeId, userToken, encryptionKey, rawToken, draft };
-}
-
-/**
- * Called after the client-side challenge succeeds. Verifies the deposit
- * actually landed, then creates the PaymentLink using the real on-chain
- * amount as the source of truth (not whatever was requested at prepare
- * time) and records the deposit Transaction against it.
- */
-export async function confirmLinkDeposit({
-  senderId,
-  userToken,
-  draft,
-}: {
-  senderId: string;
-  userToken: string;
-  draft: PendingLinkDraft;
-}) {
-  const deposit = await findDepositTransaction({
-    userToken,
-    fromWalletId: draft.senderWalletId,
-    refId: draft.refId,
-  });
-
   const link = await db.paymentLink.create({
     data: {
-      tokenHash: draft.tokenHash,
+      tokenHash: hashClaimToken(rawToken),
       senderId,
-      treasuryWalletId: draft.treasuryWalletId,
-      amountMicros: deposit.amountMicros,
-      passwordHash: draft.passwordHash,
-      expiresAt: draft.expiresAt ? new Date(draft.expiresAt) : null,
-      depositTxId: deposit.circleTxId,
-      status: "ACTIVE",
+      treasuryWalletId: treasury.id,
+      amountMicros, // requested amount; confirm/reconcile overwrite with the real on-chain amount
+      status: "PENDING_DEPOSIT",
+      passwordHash,
+      expiresAt,
+      refId,
     },
   });
 
-  await recordTransaction({
+  return {
+    linkId: link.id,
+    challengeId,
+    userToken,
+    encryptionKey,
+    rawToken,
+  };
+}
+
+/**
+ * Called after the client-side challenge succeeds. Promotes the existing
+ * PENDING_DEPOSIT row (created by prepareLinkDeposit) to ACTIVE once the
+ * deposit is confirmed on-chain, using the real on-chain amount as the
+ * source of truth rather than whatever was requested at prepare time.
+ *
+ * Idempotent: if the reconciliation job already promoted this link (or a
+ * duplicate client call arrives), returns the already-ACTIVE result rather
+ * than erroring or double-recording the transaction.
+ */
+export async function confirmLinkDeposit({
+  senderId,
+  linkId,
+  userToken,
+}: {
+  senderId: string;
+  linkId: string;
+  userToken: string;
+}) {
+  const link = await db.paymentLink.findUnique({ where: { id: linkId } });
+  if (!link) throw new LinkNotFoundError();
+  if (link.senderId !== senderId) throw new LinkOwnershipError();
+
+  if (link.status === "ACTIVE") {
+    return { linkId: link.id, amountMicros: link.amountMicros };
+  }
+  if (link.status !== "PENDING_DEPOSIT" || !link.refId) {
+    throw new Error(`Link is not awaiting a deposit (status: ${link.status})`);
+  }
+
+  const [senderWallet, treasuryWallet] = await Promise.all([
+    db.wallet.findFirstOrThrow({ where: { userId: senderId, role: "PERSONAL" } }),
+    db.wallet.findUniqueOrThrow({ where: { id: link.treasuryWalletId } }),
+  ]);
+
+  const deposit = await findDepositTransaction({
+    userToken,
+    fromWalletId: senderWallet.circleWalletId,
+    refId: link.refId,
+  });
+
+  const updated = await db.paymentLink.update({
+    where: { id: link.id },
+    data: {
+      status: "ACTIVE",
+      amountMicros: deposit.amountMicros,
+      depositTxId: deposit.circleTxId,
+    },
+  });
+
+  await recordTransactionIdempotent({
     paymentLinkId: link.id,
     type: "DEPOSIT",
     circleTxId: deposit.circleTxId,
-    fromAddress: draft.senderWalletAddress,
-    toAddress: draft.treasuryAddress,
+    fromAddress: senderWallet.address,
+    toAddress: treasuryWallet.address,
     amountMicros: deposit.amountMicros,
     status: deposit.state,
   });
 
-  return { linkId: link.id, amountMicros: deposit.amountMicros };
+  return { linkId: updated.id, amountMicros: updated.amountMicros };
+}
+
+/**
+ * The safety net itself. Scans PENDING_DEPOSIT links old enough that the
+ * synchronous confirm should have already run (or failed), and promotes
+ * any whose deposit actually landed on-chain — automatically recovering
+ * from exactly the crash scenario that previously required manual DB
+ * surgery. Links with no matching transaction yet are left as-is (either
+ * still indexing, or the user simply never authorized the transfer — the
+ * common case, and not something to "fix").
+ */
+export async function reconcilePendingDeposits({
+  olderThanMs = 30_000,
+}: { olderThanMs?: number } = {}) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const pending = await db.paymentLink.findMany({
+    where: { status: "PENDING_DEPOSIT", createdAt: { lt: cutoff } },
+  });
+
+  const results: { linkId: string; promoted: boolean; error?: string }[] = [];
+
+  for (const link of pending) {
+    try {
+      if (!link.refId) {
+        results.push({ linkId: link.id, promoted: false, error: "missing refId" });
+        continue;
+      }
+
+      const senderWallet = await db.wallet.findFirst({
+        where: { userId: link.senderId, role: "PERSONAL" },
+      });
+      if (!senderWallet) {
+        results.push({ linkId: link.id, promoted: false, error: "sender has no wallet" });
+        continue;
+      }
+
+      const { userToken } = await circleUserClient
+        .createUserToken({ userId: link.senderId })
+        .then((r) => r.data!);
+
+      const deposit = await findDepositTransaction({
+        userToken,
+        fromWalletId: senderWallet.circleWalletId,
+        refId: link.refId,
+        maxAttempts: 1, // the job's own recurring schedule is the retry loop
+      });
+
+      const treasuryWallet = await db.wallet.findUniqueOrThrow({
+        where: { id: link.treasuryWalletId },
+      });
+
+      await db.paymentLink.update({
+        where: { id: link.id },
+        data: {
+          status: "ACTIVE",
+          amountMicros: deposit.amountMicros,
+          depositTxId: deposit.circleTxId,
+        },
+      });
+
+      await recordTransactionIdempotent({
+        paymentLinkId: link.id,
+        type: "DEPOSIT",
+        circleTxId: deposit.circleTxId,
+        fromAddress: senderWallet.address,
+        toAddress: treasuryWallet.address,
+        amountMicros: deposit.amountMicros,
+        status: deposit.state,
+      });
+
+      results.push({ linkId: link.id, promoted: true });
+    } catch (err) {
+      if (err instanceof DepositNotIndexedYetError) {
+        results.push({ linkId: link.id, promoted: false });
+      } else {
+        results.push({
+          linkId: link.id,
+          promoted: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  return results;
 }

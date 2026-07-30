@@ -120,6 +120,7 @@ model Wallet {
 }
 
 enum LinkStatus {
+  PENDING_DEPOSIT
   ACTIVE
   CLAIMED
   EXPIRED
@@ -132,10 +133,14 @@ model PaymentLink {
   senderId         String
   treasuryWalletId String
   amountMicros     BigInt
-  status           LinkStatus @default(ACTIVE)
+  status           LinkStatus @default(PENDING_DEPOSIT)
   passwordHash     String?
   expiresAt        DateTime?
   depositTxId      String?
+  // Ties this row to the on-chain deposit before it's confirmed. Only
+  // meaningful while status = PENDING_DEPOSIT; the reconciliation job uses
+  // it to find the transaction if the synchronous confirm never completes.
+  refId            String?    @unique
   createdAt        DateTime   @default(now())
   claimedAt        DateTime?
 
@@ -145,6 +150,7 @@ model PaymentLink {
 
   @@index([senderId])
   @@index([status, expiresAt])
+  @@index([status, createdAt])
 }
 
 enum ClaimStatus {

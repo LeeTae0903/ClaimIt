@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 
 type PrepareResponse = {
+  linkId: string;
   challengeId: string;
   userToken: string;
   encryptionKey: string;
@@ -18,10 +19,20 @@ function sleep(ms: number) {
 }
 
 // The server already retries internally, but Circle's indexing lag can
-// occasionally outlast that too — retry here as well before giving up.
-async function confirmDepositWithRetry(maxAttempts = 3, delayMs = 3000) {
+// occasionally outlast that too — retry here as well before giving up. If
+// even this gives up, the PaymentLink stays PENDING_DEPOSIT rather than
+// missing entirely, and the reconciliation job picks it up automatically.
+async function confirmDepositWithRetry(
+  linkId: string,
+  maxAttempts = 3,
+  delayMs = 3000,
+) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch("/api/links/confirm", { method: "POST" });
+    const res = await fetch("/api/links/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkId }),
+    });
     if (res.ok) return;
 
     const data = await res.json().catch(() => ({}));
@@ -67,7 +78,7 @@ export function CreateLinkForm() {
         throw new Error(prepareData.error ?? "Couldn't start this link.");
       }
 
-      const { challengeId, userToken, encryptionKey, claimToken, circleAppId } =
+      const { linkId, challengeId, userToken, encryptionKey, claimToken, circleAppId } =
         prepareData as PrepareResponse;
 
       const sdk = getWalletSdk(circleAppId);
@@ -81,7 +92,7 @@ export function CreateLinkForm() {
         });
       });
 
-      await confirmDepositWithRetry();
+      await confirmDepositWithRetry(linkId);
 
       setClaimUrl(`${window.location.origin}/claim/${claimToken}`);
     } catch (err) {

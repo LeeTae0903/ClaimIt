@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Blockchain } from "@circle-fin/developer-controlled-wallets";
+import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { circleDeveloperClient } from "@/lib/circle/developer-wallets";
 import { circleUserClient } from "@/lib/circle/user-wallets";
@@ -193,4 +194,27 @@ export async function recordTransaction(data: {
   status: string;
 }) {
   return db.transaction.create({ data });
+}
+
+/**
+ * Same as recordTransaction, but tolerates a duplicate circleTxId (P2002 on
+ * the unique constraint) as a no-op success instead of throwing. Needed
+ * because the synchronous confirm path and the reconciliation job can both
+ * race to record the same deposit — either can win, the other just finds
+ * it already recorded.
+ */
+export async function recordTransactionIdempotent(
+  data: Parameters<typeof recordTransaction>[0],
+) {
+  try {
+    return await recordTransaction(data);
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return null;
+    }
+    throw err;
+  }
 }
