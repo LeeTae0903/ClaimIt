@@ -117,6 +117,17 @@ export async function createDepositChallenge({
   return { challengeId: response.data!.challengeId, refId };
 }
 
+export class DepositNotIndexedYetError extends Error {
+  constructor() {
+    super("Deposit transaction not found yet — Circle may still be indexing it.");
+    this.name = "DepositNotIndexedYetError";
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Called after the client-side challenge from createDepositChallenge
  * succeeds. Finds the resulting transaction by refId (there's no other
@@ -125,37 +136,51 @@ export async function createDepositChallenge({
  * PaymentLink) first can do so using this result as the source of truth for
  * the actual on-chain amount before recording the transaction itself via
  * recordTransaction.
+ *
+ * There's a short, variable indexing lag between the challenge executing
+ * client-side and the transaction showing up via listTransactions — Arc
+ * itself has sub-second finality, but Circle's own query API isn't
+ * necessarily caught up the instant the client's callback fires. Retries a
+ * few times with a short delay before giving up; callers (the API route)
+ * should treat DepositNotIndexedYetError as retryable and surface that to
+ * the client rather than a hard failure.
  */
 export async function findDepositTransaction({
   userToken,
   fromWalletId,
   refId,
+  maxAttempts = 5,
+  delayMs = 1500,
 }: {
   userToken: string;
   fromWalletId: string;
   refId: string;
+  maxAttempts?: number;
+  delayMs?: number;
 }) {
-  const response = await circleUserClient.listTransactions({
-    userToken,
-    walletIds: [fromWalletId],
-  });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await circleUserClient.listTransactions({
+      userToken,
+      walletIds: [fromWalletId],
+    });
 
-  const transaction = (response.data?.transactions ?? []).find(
-    (tx) => tx.refId === refId,
-  );
-  if (!transaction) {
-    throw new Error(
-      "Deposit transaction not found yet — Circle may still be indexing it.",
+    const transaction = (response.data?.transactions ?? []).find(
+      (tx) => tx.refId === refId,
     );
+    if (transaction) {
+      return {
+        circleTxId: transaction.id,
+        state: transaction.state,
+        amountMicros: BigInt(
+          Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
+        ),
+      };
+    }
+
+    if (attempt < maxAttempts) await sleep(delayMs);
   }
 
-  return {
-    circleTxId: transaction.id,
-    state: transaction.state,
-    amountMicros: BigInt(
-      Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
-    ),
-  };
+  throw new DepositNotIndexedYetError();
 }
 
 export async function recordTransaction(data: {

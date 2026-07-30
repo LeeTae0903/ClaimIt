@@ -13,6 +13,26 @@ type PrepareResponse = {
   circleAppId: string;
 };
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// The server already retries internally, but Circle's indexing lag can
+// occasionally outlast that too — retry here as well before giving up.
+async function confirmDepositWithRetry(maxAttempts = 3, delayMs = 3000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch("/api/links/confirm", { method: "POST" });
+    if (res.ok) return;
+
+    const data = await res.json().catch(() => ({}));
+    if (data.retryable && attempt < maxAttempts) {
+      await sleep(delayMs);
+      continue;
+    }
+    throw new Error(data.error ?? "Couldn't confirm the deposit.");
+  }
+}
+
 export function CreateLinkForm() {
   const router = useRouter();
   const [amount, setAmount] = useState("");
@@ -61,11 +81,7 @@ export function CreateLinkForm() {
         });
       });
 
-      const confirmRes = await fetch("/api/links/confirm", { method: "POST" });
-      if (!confirmRes.ok) {
-        const confirmData = await confirmRes.json();
-        throw new Error(confirmData.error ?? "Couldn't confirm the deposit.");
-      }
+      await confirmDepositWithRetry();
 
       setClaimUrl(`${window.location.origin}/claim/${claimToken}`);
     } catch (err) {

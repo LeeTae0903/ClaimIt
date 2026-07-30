@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { confirmLinkDeposit } from "@/server/services/payment-link-service";
+import { DepositNotIndexedYetError } from "@/server/services/transfer-service";
 import { clearUserTokenCookie, getUserTokenCookie } from "@/lib/circle/user-token-cookie";
 import { clearDraftCookie, getDraftCookie } from "@/lib/payment-link-draft-cookie";
 
@@ -19,14 +20,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await confirmLinkDeposit({
-    senderId: session.user.id,
-    userToken,
-    draft,
-  });
+  try {
+    const result = await confirmLinkDeposit({
+      senderId: session.user.id,
+      userToken,
+      draft,
+    });
 
-  const response = NextResponse.json(result);
-  clearUserTokenCookie(response);
-  clearDraftCookie(response);
-  return response;
+    const response = NextResponse.json(result);
+    clearUserTokenCookie(response);
+    clearDraftCookie(response);
+    return response;
+  } catch (err) {
+    // Deliberately don't clear the draft/userToken cookies here — the
+    // client is expected to retry the same confirm call, and it needs the
+    // same draft (refId etc.) to find the same deposit transaction.
+    if (err instanceof DepositNotIndexedYetError) {
+      return NextResponse.json(
+        { error: err.message, retryable: true },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json(
+      { error: "Couldn't confirm the deposit.", retryable: false },
+      { status: 500 },
+    );
+  }
 }
