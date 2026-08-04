@@ -23,7 +23,7 @@ export function AccountMenu() {
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [balanceMicros, setBalanceMicros] = useState<bigint | null>(null);
+  const [balances, setBalances] = useState<Record<string, bigint>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,12 +35,25 @@ export function AccountMenu() {
       setInfo(data);
 
       // Read straight from Arc rather than storing a balance we'd have to keep
-      // fresh. Failing quietly: a missing balance is worth less than a broken
-      // account menu.
-      const address = data?.wallets[0]?.address ?? data?.walletAddresses[0]?.address;
-      if (!address) return;
-      const balance = await getUsdcBalanceMicros(address).catch(() => null);
-      if (!cancelled && balance !== null) setBalanceMicros(balance);
+      // fresh. Both addresses, because the built-in wallet is only worth
+      // mentioning at all when it still holds something.
+      const addresses = [
+        data?.walletAddresses[0]?.address,
+        data?.wallets[0]?.address,
+      ].filter((a): a is string => !!a);
+
+      const entries = await Promise.all(
+        addresses.map(async (address) => {
+          const balance = await getUsdcBalanceMicros(address).catch(() => null);
+          return [address, balance] as const;
+        }),
+      );
+      if (cancelled) return;
+      setBalances(
+        Object.fromEntries(
+          entries.filter((e): e is readonly [string, bigint] => e[1] !== null),
+        ),
+      );
     })();
     return () => {
       cancelled = true;
@@ -80,12 +93,22 @@ export function AccountMenu() {
 
   if (!info) return null;
 
-  // A Circle-provisioned wallet if there is one, otherwise the address the
-  // user signed in with. Both are "your wallet" from here.
-  const circleWallet = info.wallets[0];
+  // The wallet they signed in with always wins. It IS the account — a Circle
+  // wallet left over from an earlier visit to /wallet/setup is not what
+  // "your wallet" means to someone who authenticated with MetaMask.
   const siweAddress = info.walletAddresses[0]?.address;
-  const walletAddress = circleWallet?.address ?? siweAddress;
-  const walletKind = circleWallet ? "Built-in wallet" : "Connected wallet";
+  const circleWallet = info.wallets[0];
+  const primaryAddress = siweAddress ?? circleWallet?.address;
+  const primaryKind = siweAddress ? "Signed in with" : "Built-in wallet";
+
+  // The built-in wallet is only mentioned when it still holds USDC. Listing an
+  // empty one is the clutter the user objected to; silently dropping one with
+  // a balance would hide their money.
+  const leftoverCircle =
+    siweAddress && circleWallet && (balances[circleWallet.address] ?? 0n) > 0n
+      ? circleWallet
+      : null;
+
   // A wallet sign-in gets a synthetic email (0x…@domain) so Better Auth has a
   // unique identifier; showing that to the user would be nonsense. The address
   // is what they recognise.
@@ -126,31 +149,33 @@ export function AccountMenu() {
 
           <div className="border-b border-line px-4 py-3">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="eyebrow">{walletAddress ? walletKind : "Wallet"}</span>
-              {walletAddress && (
+              <span className="eyebrow">
+                {primaryAddress ? primaryKind : "Wallet"}
+              </span>
+              {primaryAddress && (
                 <span className="numeric text-sm">
-                  {balanceMicros === null
+                  {balances[primaryAddress] === undefined
                     ? "…"
-                    : (Number(balanceMicros) / 1e6).toFixed(2)}{" "}
+                    : (Number(balances[primaryAddress]) / 1e6).toFixed(2)}{" "}
                   <span className="text-xs text-faint">USDC</span>
                 </span>
               )}
             </div>
-            {walletAddress ? (
+            {primaryAddress ? (
               <>
                 <p className="mt-1.5 font-mono text-xs leading-relaxed break-all text-muted">
-                  {walletAddress}
+                  {primaryAddress}
                 </p>
                 <div className="mt-2.5 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => copyAddress(walletAddress)}
+                    onClick={() => copyAddress(primaryAddress)}
                     className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-line-strong hover:text-ink"
                   >
-                    {copied ? "Copied" : `Copy ${shorten(walletAddress)}`}
+                    {copied ? "Copied" : `Copy ${shorten(primaryAddress)}`}
                   </button>
                   <a
-                    href={`https://testnet.arcscan.app/address/${walletAddress}`}
+                    href={`https://testnet.arcscan.app/address/${primaryAddress}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs text-accent transition hover:underline"
@@ -175,6 +200,25 @@ export function AccountMenu() {
               </div>
             )}
           </div>
+
+          {leftoverCircle && (
+            <div className="border-b border-line px-4 py-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="eyebrow">Built-in wallet</span>
+                <span className="numeric text-sm">
+                  {(Number(balances[leftoverCircle.address]) / 1e6).toFixed(2)}{" "}
+                  <span className="text-xs text-faint">USDC</span>
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-faint">
+                From an earlier setup on this account, and it still holds funds.
+                Nothing uses it now that you sign in with your own wallet.
+              </p>
+              <p className="mt-1.5 font-mono text-[0.7rem] leading-relaxed break-all text-muted">
+                {leftoverCircle.address}
+              </p>
+            </div>
+          )}
 
           <button
             type="button"

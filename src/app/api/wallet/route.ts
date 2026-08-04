@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
     db.walletAddress.findMany({
       where: { userId: session.user.id },
       select: { address: true, chainId: true },
-      orderBy: { createdAt: "asc" },
+      // isPrimary first: "the oldest address I ever linked" is not the same
+      // as "the wallet I use", and only the second is worth defaulting to.
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     }),
   ]);
 

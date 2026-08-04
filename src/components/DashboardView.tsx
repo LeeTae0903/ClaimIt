@@ -2,15 +2,27 @@
 
 import { useEffect, useState } from "react";
 
-type SentLink = {
-  id: string;
-  amountMicros: string;
-  status: string;
-  hasPassword: boolean;
-  createdAt: string;
-  claimedAt: string | null;
-  expiresAt: string | null;
-};
+type SentEntry =
+  | {
+      kind: "link";
+      id: string;
+      amountMicros: string;
+      status: string;
+      hasPassword: boolean;
+      createdAt: string;
+      claimedAt: string | null;
+      expiresAt: string | null;
+    }
+  | {
+      kind: "batch";
+      id: string;
+      amountMicros: string;
+      linkCount: number;
+      claimedCount: number;
+      status: string;
+      createdAt: string;
+      expiresAt: string | null;
+    };
 
 type ReceivedClaim = {
   id: string;
@@ -61,10 +73,14 @@ function Row({
   amountMicros,
   meta,
   status,
+  rawStatus,
 }: {
   amountMicros: string;
   meta: string;
   status: string;
+  /** Show the label as-is instead of mapping it to a LinkStatus badge — a
+      giveaway's state is a progress count, not one of the link statuses. */
+  rawStatus?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3.5 last:border-b-0">
@@ -75,7 +91,13 @@ function Row({
         </p>
         <p className="mt-0.5 truncate text-xs text-faint">{meta}</p>
       </div>
-      <StatusBadge status={status} />
+      {rawStatus ? (
+        <span className="shrink-0 rounded-full bg-white/[0.06] px-2.5 py-1 font-mono text-[0.66rem] uppercase tracking-wider text-muted">
+          {status}
+        </span>
+      ) : (
+        <StatusBadge status={status} />
+      )}
     </div>
   );
 }
@@ -109,13 +131,13 @@ function LoadingRows() {
 
 export function DashboardView() {
   const [tab, setTab] = useState<"sent" | "received">("sent");
-  const [sent, setSent] = useState<SentLink[] | null>(null);
+  const [sent, setSent] = useState<SentEntry[] | null>(null);
   const [received, setReceived] = useState<ReceivedClaim[] | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard/sent")
       .then((res) => res.json())
-      .then((data) => setSent(data.links));
+      .then((data) => setSent(data.entries));
     fetch("/api/dashboard/received")
       .then((res) => res.json())
       .then((data) => setReceived(data.claims));
@@ -148,16 +170,26 @@ export function DashboardView() {
               body="Create one and the escrowed amount shows up here until someone claims it."
             />
           ) : (
-            sent.map((link) => (
-              <Row
-                key={link.id}
-                amountMicros={link.amountMicros}
-                status={link.status}
-                meta={`${formatDate(link.createdAt)}${
-                  link.hasPassword ? " · password protected" : ""
-                }`}
-              />
-            ))
+            sent.map((entry) =>
+              entry.kind === "batch" ? (
+                <Row
+                  key={entry.id}
+                  amountMicros={entry.amountMicros}
+                  status={`${entry.claimedCount}/${entry.linkCount} claimed`}
+                  rawStatus
+                  meta={`Giveaway · ${entry.linkCount} links · ${formatDate(entry.createdAt)}`}
+                />
+              ) : (
+                <Row
+                  key={entry.id}
+                  amountMicros={entry.amountMicros}
+                  status={entry.status}
+                  meta={`${formatDate(entry.createdAt)}${
+                    entry.hasPassword ? " · password protected" : ""
+                  }`}
+                />
+              ),
+            )
           ))}
 
         {tab === "received" &&

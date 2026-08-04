@@ -63,27 +63,29 @@ export function CreateModeSwitch({
     <div className="space-y-6">
       <Segmented options={MODES} value={mode} onChange={setMode} />
 
-      {mode === "single" ? (
-        <div className="space-y-5">
-          <div>
-            <span className="eyebrow">Fund it from</span>
-            <div className="mt-2">
-              <Segmented
-                options={SOURCES}
-                value={source}
-                onChange={setSource}
-                small
-              />
-            </div>
+      <div className="space-y-5">
+        <div>
+          <span className="eyebrow">Fund it from</span>
+          <div className="mt-2">
+            <Segmented
+              options={SOURCES}
+              value={source}
+              onChange={setSource}
+              small
+            />
           </div>
-          {source === "builtin" ? <CreateLinkForm /> : <ExternalLinkForm />}
         </div>
-      ) : (
-        // Giveaways go through the built-in wallet for now: a batch signed
-        // from an external wallet needs the same on-chain verification path,
-        // just applied to the batch, and that hasn't been exercised yet.
-        <GiveawayForm />
-      )}
+
+        {mode === "single" ? (
+          source === "builtin" ? (
+            <CreateLinkForm />
+          ) : (
+            <ExternalLinkForm />
+          )
+        ) : (
+          <GiveawayForm source={source} />
+        )}
+      </div>
     </div>
   );
 }

@@ -24,7 +24,9 @@ export function ClaimPageClient({ token }: { token: string }) {
 
   const [info, setInfo] = useState<PublicLinkInfo | null>(null);
   const [address, setAddress] = useState("");
-  const [prefilled, setPrefilled] = useState(false);
+  const [prefilled, setPrefilled] = useState<"signed-in" | "built-in" | null>(
+    null,
+  );
   const [password, setPassword] = useState("");
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,17 +41,19 @@ export function ClaimPageClient({ token }: { token: string }) {
       .catch(() => setInfo({ found: false }));
   }, [token]);
 
-  // If the visitor happens to already have a wallet here, offer it rather
-  // than making them go and copy their own address. Still editable — they may
-  // want the money somewhere else entirely.
+  // Offer the visitor's own wallet rather than making them go and copy their
+  // address. The one they signed in with wins: it's the wallet they hold keys
+  // to, and paying into a leftover built-in wallet they never open is worse
+  // than not prefilling at all — the transfer can't be undone.
   useEffect(() => {
     fetch("/api/wallet")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        const own = data?.wallets?.[0]?.address;
+        const signedInWith = data?.walletAddresses?.[0]?.address;
+        const own = signedInWith ?? data?.wallets?.[0]?.address;
         if (own) {
           setAddress(own);
-          setPrefilled(true);
+          setPrefilled(signedInWith ? "signed-in" : "built-in");
         }
       })
       .catch(() => {});
@@ -202,7 +206,7 @@ export function ClaimPageClient({ token }: { token: string }) {
               value={address}
               onChange={(e) => {
                 setAddress(e.target.value);
-                setPrefilled(false);
+                setPrefilled(null);
               }}
               placeholder="0x… your wallet address on Arc"
               className="field font-mono text-sm"
@@ -214,9 +218,11 @@ export function ClaimPageClient({ token }: { token: string }) {
             >
               {showAddressError
                 ? "That isn't a valid address. Check every character — a payout can't be undone."
-                : prefilled
-                  ? "This is your wallet. Change it if you want the money elsewhere."
-                  : "Double-check it. The transfer is final and goes wherever this points."}
+                : prefilled === "signed-in"
+                  ? "The wallet you signed in with. Change it if you want the money elsewhere."
+                  : prefilled === "built-in"
+                    ? "Your built-in wallet. Change it if you want the money elsewhere."
+                    : "Double-check it. The transfer is final and goes wherever this points."}
             </p>
           </div>
 

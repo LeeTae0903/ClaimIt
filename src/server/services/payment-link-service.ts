@@ -7,6 +7,7 @@ import {
   DepositNotIndexedYetError,
 } from "@/server/services/transfer-service";
 import { generateClaimToken, hashClaimToken } from "@/lib/claim-token";
+import { getAddress } from "viem";
 import { Prisma } from "@/generated/prisma/client";
 import { verifyUsdcDeposit } from "@/server/services/onchain-deposit";
 
@@ -177,6 +178,47 @@ export class DepositAlreadyUsedError extends Error {
   }
 }
 
+export class DepositNotFromSenderError extends Error {
+  constructor() {
+    super(
+      "That deposit came from a wallet this account hasn't proven it owns. Sign in with the wallet you're funding from.",
+    );
+    this.name = "DepositNotFromSenderError";
+  }
+}
+
+/**
+ * Ties an on-chain deposit to the person claiming credit for it.
+ *
+ * Without this, a transaction hash is a bearer token for anyone watching the
+ * chain: the treasury addresses are public, so an attacker could create a link
+ * for the same amount, wait for someone else's transfer into escrow, and
+ * submit that hash as their own funding. Uniqueness alone doesn't help — it
+ * only decides who gets there first, and the thief can be faster than the
+ * person who actually paid.
+ *
+ * A SIWE signature is the only thing that proves the sender controls the
+ * paying wallet, so that proof is what's required. Funding from a wallet the
+ * account hasn't signed in with means signing in with it.
+ */
+export async function assertDepositFromSender({
+  senderId,
+  fromAddress,
+}: {
+  senderId: string;
+  fromAddress: string;
+}) {
+  const proven = await db.walletAddress.findMany({
+    where: { userId: senderId },
+    select: { address: true },
+  });
+
+  const from = getAddress(fromAddress);
+  if (!proven.some((w) => getAddress(w.address) === from)) {
+    throw new DepositNotFromSenderError();
+  }
+}
+
 /**
  * Creates a link the sender will fund from their own wallet.
  *
@@ -263,6 +305,7 @@ export async function confirmExternalLink({
     treasuryAddress: treasury.address,
     minAmountMicros: link.amountMicros,
   });
+  await assertDepositFromSender({ senderId, fromAddress: deposit.fromAddress });
 
   try {
     const [updated] = await db.$transaction([
@@ -307,19 +350,51 @@ export async function confirmExternalLink({
  * still indexing, or the user simply never authorized the transfer — the
  * common case, and not something to "fix").
  */
+/**
+ * How long an unfunded attempt is kept alive. Past this, the sender plainly
+ * never authorised the transfer — the Circle challenge has long expired — and
+ * retrying it daily forever is just noise. Cancelled rather than deleted so
+ * the record of the attempt survives.
+ */
+export const ABANDON_PENDING_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export async function reconcilePendingDeposits({
   olderThanMs = 30_000,
 }: { olderThanMs?: number } = {}) {
   const cutoff = new Date(Date.now() - olderThanMs);
   const pending = await db.paymentLink.findMany({
-    where: { status: "PENDING_DEPOSIT", createdAt: { lt: cutoff } },
+    where: {
+      status: "PENDING_DEPOSIT",
+      createdAt: { lt: cutoff },
+      // Links belonging to a giveaway are the batch's business: their deposit
+      // is the batch's single transfer, and they carry no refId of their own.
+      // Sweeping them here only ever produced "missing refId".
+      batchId: null,
+    },
   });
 
-  const results: { linkId: string; promoted: boolean; error?: string }[] = [];
+  const results: {
+    linkId: string;
+    promoted: boolean;
+    abandoned?: boolean;
+    error?: string;
+  }[] = [];
+
+  const abandonBefore = new Date(Date.now() - ABANDON_PENDING_AFTER_MS);
 
   for (const link of pending) {
     try {
       if (!link.refId) {
+        // No refId and no batch means the sender chose the external-wallet
+        // path and never sent the transfer; there is nothing to look up.
+        if (link.createdAt < abandonBefore) {
+          await db.paymentLink.update({
+            where: { id: link.id },
+            data: { status: "CANCELLED" },
+          });
+          results.push({ linkId: link.id, promoted: false, abandoned: true });
+          continue;
+        }
         results.push({ linkId: link.id, promoted: false, error: "missing refId" });
         continue;
       }
@@ -369,6 +444,16 @@ export async function reconcilePendingDeposits({
       results.push({ linkId: link.id, promoted: true });
     } catch (err) {
       if (err instanceof DepositNotIndexedYetError) {
+        // Still nothing on-chain after a full day: the transfer was never
+        // authorised, so stop asking.
+        if (link.createdAt < abandonBefore) {
+          await db.paymentLink.update({
+            where: { id: link.id },
+            data: { status: "CANCELLED" },
+          });
+          results.push({ linkId: link.id, promoted: false, abandoned: true });
+          continue;
+        }
         results.push({ linkId: link.id, promoted: false });
       } else {
         results.push({

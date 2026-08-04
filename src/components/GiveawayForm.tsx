@@ -1,8 +1,15 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { prepareWalletSdk } from "@/lib/circle/wallet-sdk";
+import {
+  connectWallet,
+  ensureArcChain,
+  getConnectedAccount,
+  getUsdcBalanceMicros,
+  sendUsdc,
+} from "@/lib/wallet/connect";
 
 type PreparedLink = {
   linkId: string;
@@ -20,6 +27,13 @@ type PrepareResponse = {
   links: PreparedLink[];
 };
 
+type ExternalPrepareResponse = {
+  batchId: string;
+  treasuryAddress: string;
+  totalMicros: string;
+  links: PreparedLink[];
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -29,14 +43,19 @@ function formatUsdc(micros: string) {
 }
 
 // Same shape as the single-link confirm: the server retries internally, but
-// Circle's indexing lag can outlast that, and the batch stays PENDING_DEPOSIT
-// for the reconciliation job either way.
-async function confirmWithRetry(batchId: string, maxAttempts = 3, delayMs = 3000) {
+// indexing lag can outlast that, and the batch stays PENDING_DEPOSIT for the
+// reconciliation job either way.
+async function confirmWithRetry(
+  path: string,
+  body: Record<string, unknown>,
+  maxAttempts: number,
+  delayMs: number,
+) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch("/api/batches/confirm", {
+    const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batchId }),
+      body: JSON.stringify(body),
     });
     if (res.ok) return;
 
@@ -49,8 +68,14 @@ async function confirmWithRetry(batchId: string, maxAttempts = 3, delayMs = 3000
   }
 }
 
-export function GiveawayForm() {
+export function GiveawayForm({
+  source = "builtin",
+}: {
+  source?: "builtin" | "external";
+}) {
   const router = useRouter();
+  const [account, setAccount] = useState<string | null>(null);
+  const [balanceMicros, setBalanceMicros] = useState<bigint | null>(null);
   const [total, setTotal] = useState("");
   const [count, setCount] = useState("10");
   const [expiresInHours, setExpiresInHours] = useState("");
@@ -67,22 +92,57 @@ export function GiveawayForm() {
       ? totalNum / countNum
       : null;
 
+  // Pick up an already-authorised wallet without prompting.
+  useEffect(() => {
+    if (source !== "external") return;
+    let cancelled = false;
+    (async () => {
+      const existing = await getConnectedAccount();
+      if (cancelled || !existing) return;
+      setAccount(existing);
+      const balance = await getUsdcBalanceMicros(existing).catch(() => null);
+      if (!cancelled && balance !== null) setBalanceMicros(balance);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  async function handleConnect() {
+    setError(null);
+    try {
+      const address = await connectWallet();
+      await ensureArcChain();
+      setAccount(address);
+      setBalanceMicros(await getUsdcBalanceMicros(address));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't connect.");
+    }
+  }
+
+  const body = {
+    totalAmount: total,
+    linkCount: countNum,
+    expiresInHours: expiresInHours || undefined,
+    withPasswords,
+  };
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
-      const prepareRes = await fetch("/api/batches/prepare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          totalAmount: total,
-          linkCount: countNum,
-          expiresInHours: expiresInHours || undefined,
-          withPasswords,
-        }),
-      });
+      const prepareRes = await fetch(
+        source === "external"
+          ? "/api/batches/prepare-external"
+          : "/api/batches/prepare",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
       const prepared = await prepareRes.json();
 
       if (!prepareRes.ok) {
@@ -91,6 +151,30 @@ export function GiveawayForm() {
           return;
         }
         throw new Error(prepared.error ?? "Couldn't start this giveaway.");
+      }
+
+      if (source === "external") {
+        if (!account) throw new Error("Connect a wallet first.");
+        const { batchId, treasuryAddress, totalMicros, links: prepLinks } =
+          prepared as ExternalPrepareResponse;
+
+        await ensureArcChain();
+        const txHash = await sendUsdc({
+          from: account,
+          to: treasuryAddress,
+          amountMicros: BigInt(totalMicros),
+        });
+        await confirmWithRetry(
+          "/api/batches/confirm-external",
+          { batchId, txHash },
+          8,
+          2500,
+        );
+        setLinks(prepLinks);
+        setBalanceMicros(
+          await getUsdcBalanceMicros(account).catch(() => balanceMicros!),
+        );
+        return;
       }
 
       const { batchId, challengeId, userToken, encryptionKey, circleAppId, links: prepLinks } =
@@ -106,7 +190,7 @@ export function GiveawayForm() {
         });
       });
 
-      await confirmWithRetry(batchId);
+      await confirmWithRetry("/api/batches/confirm", { batchId }, 3, 3000);
       setLinks(prepLinks);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -209,8 +293,49 @@ export function GiveawayForm() {
     );
   }
 
+  if (source === "external" && !account) {
+    return (
+      <div className="space-y-4">
+        <div className="card p-5">
+          <p className="text-sm leading-relaxed text-muted">
+            One transfer from your wallet funds the whole giveaway — you sign
+            once, however many links it splits into.
+          </p>
+        </div>
+        {error && (
+          <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">
+            {error}
+          </p>
+        )}
+        <button type="button" onClick={handleConnect} className="btn btn-primary">
+          Connect wallet
+        </button>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {source === "external" && account && (
+        <div className="flex items-center justify-between rounded-xl border border-line bg-surface px-4 py-3">
+          <div>
+            <span className="eyebrow">Funding from</span>
+            <p className="mt-1 font-mono text-xs text-muted">
+              {account.slice(0, 6)}…{account.slice(-4)}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="eyebrow">Balance</span>
+            <p className="numeric mt-1 text-sm">
+              {balanceMicros === null
+                ? "…"
+                : (Number(balanceMicros) / 1e6).toFixed(2)}{" "}
+              <span className="text-xs text-faint">USDC</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label className="field-label">Total to give away</label>

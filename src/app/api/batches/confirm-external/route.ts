@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
-  confirmExternalLink,
   DepositAlreadyUsedError,
   DepositNotFromSenderError,
   LinkNotFoundError,
   LinkOwnershipError,
 } from "@/server/services/payment-link-service";
+import { confirmExternalBatch } from "@/server/services/batch-service";
 import {
   DepositNotMinedError,
   DepositRejectedError,
 } from "@/server/services/onchain-deposit";
 
-// Arc finalises in under a second, but the RPC node this reads from may lag a
-// moment behind the wallet that broadcast the transaction.
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
@@ -23,32 +21,30 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const { linkId, txHash } = body as { linkId?: string; txHash?: string };
-  if (!linkId || !txHash) {
+  const { batchId, txHash } = body as { batchId?: string; txHash?: string };
+  if (!batchId || !txHash) {
     return NextResponse.json(
-      { error: "Missing linkId or txHash" },
+      { error: "Missing batchId or txHash" },
       { status: 400 },
     );
   }
 
   try {
-    const result = await confirmExternalLink({
+    const result = await confirmExternalBatch({
       senderId: session.user.id,
-      linkId,
+      batchId,
       txHash,
     });
-    return NextResponse.json({
-      linkId: result.linkId,
-      amountMicros: result.amountMicros.toString(),
-    });
+    return NextResponse.json(result);
   } catch (err) {
-    // Young transaction, not a bad one — the client should keep asking.
     if (err instanceof DepositNotMinedError) {
       return NextResponse.json(
         { error: err.message, retryable: true },
         { status: 409 },
       );
     }
+    // Terminal: no link was activated, so retrying can't help. Covers both a
+    // transfer to the wrong place and one that doesn't cover the total.
     if (err instanceof DepositRejectedError) {
       return NextResponse.json(
         { error: err.message, retryable: false },
@@ -76,7 +72,7 @@ export async function POST(request: NextRequest) {
     if (err instanceof LinkOwnershipError) {
       return NextResponse.json({ error: err.message }, { status: 403 });
     }
-    console.error("[links/confirm-external] unexpected failure:", err);
+    console.error("[batches/confirm-external] unexpected failure:", err);
     return NextResponse.json(
       { error: "Couldn't confirm the deposit.", retryable: false },
       { status: 500 },

@@ -9,23 +9,18 @@ export default async function NewLinkPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in?redirect=/links/new");
 
-  // Someone who signed in with their own wallet has no Circle wallet, so
-  // defaulting to the built-in one would send them straight to wallet setup
-  // for a wallet they don't need. Decided on the server so the form never
-  // renders the wrong choice first and then corrects itself.
-  const [circleWallet, siweAddress] = await Promise.all([
-    db.wallet.findFirst({
-      where: { userId: session.user.id, role: "PERSONAL" },
-      select: { id: true },
-    }),
-    db.walletAddress.findFirst({
-      where: { userId: session.user.id },
-      select: { address: true },
-    }),
-  ]);
+  // If they signed in with a wallet, that wallet is the account — so it funds
+  // links, full stop. An earlier visit to /wallet/setup may have left a Circle
+  // wallet behind, and letting its mere existence win sent people who had just
+  // authenticated with MetaMask back into a PIN flow for a wallet they never
+  // asked for. Decided on the server so the form never renders the wrong
+  // choice and corrects itself a moment later.
+  const siweAddress = await db.walletAddress.findFirst({
+    where: { userId: session.user.id },
+    select: { address: true },
+  });
 
-  const defaultSource =
-    !circleWallet && siweAddress ? "external" : "builtin";
+  const defaultSource = siweAddress ? "external" : "builtin";
 
   return (
     <Shell account action={<ShellAction href="/dashboard" label="Activity" />}>

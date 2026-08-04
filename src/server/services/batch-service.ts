@@ -6,13 +6,18 @@ import {
   recordTransactionIdempotent,
   DepositNotIndexedYetError,
 } from "@/server/services/transfer-service";
+import { Prisma } from "@/generated/prisma/client";
 import { generateClaimToken, hashClaimToken } from "@/lib/claim-token";
 import { generateReadablePassword, hashPassword } from "@/lib/password";
+import { verifyUsdcDeposit } from "@/server/services/onchain-deposit";
 import {
   MIN_LINK_AMOUNT_MICROS,
   NoWalletError,
   LinkNotFoundError,
   LinkOwnershipError,
+  DepositAlreadyUsedError,
+  assertDepositFromSender,
+  ABANDON_PENDING_AFTER_MS,
 } from "@/server/services/payment-link-service";
 
 /** Bounded so one request can't create thousands of rows and Circle calls. */
@@ -47,6 +52,62 @@ export function splitMicros(total: bigint, count: number): bigint[] {
 }
 
 /**
+ * Validates the split and picks a treasury wallet. Shared so the Circle and
+ * external funding paths can't drift on what a valid batch is.
+ */
+async function planBatch({
+  totalMicros,
+  linkCount,
+}: {
+  totalMicros: bigint;
+  linkCount: number;
+}) {
+  if (!Number.isInteger(linkCount) || linkCount < 1) {
+    throw new Error("linkCount must be a positive integer");
+  }
+  if (linkCount > MAX_BATCH_LINKS) {
+    throw new Error(`A batch can hold at most ${MAX_BATCH_LINKS} links`);
+  }
+
+  const amounts = splitMicros(totalMicros, linkCount);
+  if (amounts[amounts.length - 1] < MIN_LINK_AMOUNT_MICROS) {
+    throw new Error(
+      `Each link would get less than the ${MIN_LINK_AMOUNT_MICROS} micro minimum — use fewer links or a larger total.`,
+    );
+  }
+
+  const treasuries = await db.wallet.findMany({ where: { role: "TREASURY" } });
+  if (treasuries.length === 0) throw new Error("No treasury wallets configured");
+
+  return {
+    amounts,
+    treasury: treasuries[Math.floor(Math.random() * treasuries.length)],
+  };
+}
+
+/**
+ * Generates the per-link claim token and optional password.
+ *
+ * Kept in one place because the plaintext must exist only in the caller's
+ * scope and the response it returns — only hashes are persisted.
+ */
+async function mintBatchSecrets(amounts: bigint[], withPasswords: boolean) {
+  return Promise.all(
+    amounts.map(async (amountMicros) => {
+      const rawToken = generateClaimToken();
+      const password = withPasswords ? generateReadablePassword() : null;
+      return {
+        amountMicros,
+        rawToken,
+        password,
+        tokenHash: hashClaimToken(rawToken),
+        passwordHash: password ? await hashPassword(password) : null,
+      };
+    }),
+  );
+}
+
+/**
  * Creates a giveaway: one deposit challenge for the whole amount, and N
  * PENDING_DEPOSIT links persisted before the sender can authorise anything —
  * the same ordering the single-link flow uses, for the same reason. If the
@@ -69,28 +130,12 @@ export async function prepareBatchDeposit({
   expiresAt: Date | null;
   withPasswords: boolean;
 }) {
-  if (!Number.isInteger(linkCount) || linkCount < 1) {
-    throw new Error("linkCount must be a positive integer");
-  }
-  if (linkCount > MAX_BATCH_LINKS) {
-    throw new Error(`A batch can hold at most ${MAX_BATCH_LINKS} links`);
-  }
-
-  const amounts = splitMicros(totalMicros, linkCount);
-  if (amounts[amounts.length - 1] < MIN_LINK_AMOUNT_MICROS) {
-    throw new Error(
-      `Each link would get less than the ${MIN_LINK_AMOUNT_MICROS} micro minimum — use fewer links or a larger total.`,
-    );
-  }
+  const { amounts, treasury } = await planBatch({ totalMicros, linkCount });
 
   const senderWallet = await db.wallet.findFirst({
     where: { userId: senderId, role: "PERSONAL" },
   });
   if (!senderWallet) throw new NoWalletError();
-
-  const treasuries = await db.wallet.findMany({ where: { role: "TREASURY" } });
-  if (treasuries.length === 0) throw new Error("No treasury wallets configured");
-  const treasury = treasuries[Math.floor(Math.random() * treasuries.length)];
 
   const { userToken, encryptionKey } = await circleUserClient
     .createUserToken({ userId: senderId })
@@ -103,21 +148,7 @@ export async function prepareBatchDeposit({
     amountMicros: totalMicros,
   });
 
-  // Tokens and passwords are generated up front so the plaintext exists only
-  // in this function's scope and the response it returns.
-  const secrets = await Promise.all(
-    amounts.map(async (amountMicros) => {
-      const rawToken = generateClaimToken();
-      const password = withPasswords ? generateReadablePassword() : null;
-      return {
-        amountMicros,
-        rawToken,
-        password,
-        tokenHash: hashClaimToken(rawToken),
-        passwordHash: password ? await hashPassword(password) : null,
-      };
-    }),
-  );
+  const secrets = await mintBatchSecrets(amounts, withPasswords);
 
   const batch = await db.linkBatch.create({
     data: {
@@ -237,6 +268,148 @@ export async function confirmBatchDeposit({
   return { batchId: batch.id, linkCount: batch.linkCount };
 }
 
+/**
+ * A giveaway the sender funds from their own wallet.
+ *
+ * Same shape as prepareBatchDeposit minus everything Circle: no user token, no
+ * challenge, no provisioned wallet. The rows exist first, as always, and the
+ * caller is told which treasury address to pay.
+ */
+export async function prepareExternalBatch({
+  senderId,
+  totalMicros,
+  linkCount,
+  expiresAt,
+  withPasswords,
+}: {
+  senderId: string;
+  totalMicros: bigint;
+  linkCount: number;
+  expiresAt: Date | null;
+  withPasswords: boolean;
+}) {
+  const { amounts, treasury } = await planBatch({ totalMicros, linkCount });
+  const secrets = await mintBatchSecrets(amounts, withPasswords);
+
+  const batch = await db.linkBatch.create({
+    data: {
+      senderId,
+      treasuryWalletId: treasury.id,
+      totalMicros,
+      linkCount,
+      status: "PENDING_DEPOSIT",
+      links: {
+        create: secrets.map((s) => ({
+          tokenHash: s.tokenHash,
+          senderId,
+          treasuryWalletId: treasury.id,
+          amountMicros: s.amountMicros,
+          status: "PENDING_DEPOSIT",
+          passwordHash: s.passwordHash,
+          expiresAt,
+        })),
+      },
+    },
+    include: { links: { orderBy: { createdAt: "asc" } } },
+  });
+
+  return {
+    batchId: batch.id,
+    treasuryAddress: treasury.address,
+    totalMicros,
+    links: batch.links.map((link, i) => ({
+      linkId: link.id,
+      amountMicros: link.amountMicros,
+      rawToken: secrets[i].rawToken,
+      password: secrets[i].password,
+    })),
+  };
+}
+
+/**
+ * Activates an externally funded giveaway.
+ *
+ * The coverage rule is the one that matters and is the same as the Circle
+ * path's: a batch promises the sum of its links, so a deposit that doesn't
+ * cover it fails the batch rather than activating links backed by nothing.
+ * Replay is stopped by the unique constraints on the hash, claimed in the same
+ * database transaction as the activation.
+ */
+export async function confirmExternalBatch({
+  senderId,
+  batchId,
+  txHash,
+}: {
+  senderId: string;
+  batchId: string;
+  txHash: string;
+}) {
+  const batch = await db.linkBatch.findUnique({
+    where: { id: batchId },
+    include: { links: true },
+  });
+  if (!batch) throw new LinkNotFoundError();
+  if (batch.senderId !== senderId) throw new LinkOwnershipError();
+
+  if (batch.status === "ACTIVE") {
+    return { batchId: batch.id, linkCount: batch.linkCount };
+  }
+  if (batch.status !== "PENDING_DEPOSIT") {
+    throw new Error(`Batch is not awaiting a deposit (status: ${batch.status})`);
+  }
+
+  const treasury = await db.wallet.findUniqueOrThrow({
+    where: { id: batch.treasuryWalletId },
+  });
+
+  const promised = batch.links.reduce((sum, l) => sum + l.amountMicros, 0n);
+
+  const deposit = await verifyUsdcDeposit({
+    txHash,
+    treasuryAddress: treasury.address,
+    minAmountMicros: promised,
+  });
+  await assertDepositFromSender({ senderId, fromAddress: deposit.fromAddress });
+
+  try {
+    await db.$transaction([
+      db.linkBatch.update({
+        where: { id: batch.id },
+        data: {
+          status: "ACTIVE",
+          externalTxHash: txHash,
+          depositedMicros: deposit.amountMicros,
+        },
+      }),
+      db.paymentLink.updateMany({
+        where: { batchId: batch.id, status: "PENDING_DEPOSIT" },
+        data: { status: "ACTIVE" },
+      }),
+      db.transaction.create({
+        data: {
+          batchId: batch.id,
+          type: "DEPOSIT",
+          onchainTxHash: txHash,
+          fromAddress: deposit.fromAddress,
+          toAddress: treasury.address,
+          amountMicros: deposit.amountMicros,
+          status: "COMPLETE",
+        },
+      }),
+    ]);
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      throw new DepositAlreadyUsedError();
+    }
+    throw err;
+  }
+
+  return { batchId: batch.id, linkCount: batch.linkCount };
+}
+
 /** The batch equivalent of reconcilePendingDeposits, same rationale. */
 export async function reconcilePendingBatches({
   olderThanMs = 30_000,
@@ -246,10 +419,39 @@ export async function reconcilePendingBatches({
     where: { status: "PENDING_DEPOSIT", createdAt: { lt: cutoff } },
   });
 
-  const results: { batchId: string; promoted: boolean; error?: string }[] = [];
+  const results: {
+    batchId: string;
+    promoted: boolean;
+    abandoned?: boolean;
+    error?: string;
+  }[] = [];
+
+  const abandonBefore = new Date(Date.now() - ABANDON_PENDING_AFTER_MS);
+
+  const abandon = async (batch: { id: string }) => {
+    await db.$transaction([
+      db.linkBatch.update({ where: { id: batch.id }, data: { status: "FAILED" } }),
+      db.paymentLink.updateMany({
+        where: { batchId: batch.id, status: "PENDING_DEPOSIT" },
+        data: { status: "CANCELLED" },
+      }),
+    ]);
+  };
 
   for (const batch of pending) {
     try {
+      // An externally funded batch has no refId to look up: if the sender
+      // never signed the transfer there is nothing to find, only an age.
+      if (!batch.refId) {
+        if (batch.createdAt < abandonBefore) {
+          await abandon(batch);
+          results.push({ batchId: batch.id, promoted: false, abandoned: true });
+        } else {
+          results.push({ batchId: batch.id, promoted: false });
+        }
+        continue;
+      }
+
       const { userToken } = await circleUserClient
         .createUserToken({ userId: batch.senderId })
         .then((r) => r.data!);
@@ -262,6 +464,11 @@ export async function reconcilePendingBatches({
       results.push({ batchId: batch.id, promoted: true });
     } catch (err) {
       if (err instanceof DepositNotIndexedYetError) {
+        if (batch.createdAt < abandonBefore) {
+          await abandon(batch);
+          results.push({ batchId: batch.id, promoted: false, abandoned: true });
+          continue;
+        }
         results.push({ batchId: batch.id, promoted: false });
       } else {
         results.push({
