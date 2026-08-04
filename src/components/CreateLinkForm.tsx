@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
-import { getWalletSdk } from "@/lib/circle/wallet-sdk";
+import { prepareWalletSdk } from "@/lib/circle/wallet-sdk";
 
 type PrepareResponse = {
   linkId: string;
@@ -89,8 +89,7 @@ export function CreateLinkForm() {
       const { linkId, challengeId, userToken, encryptionKey, claimToken, circleAppId } =
         prepareData as PrepareResponse;
 
-      const sdk = getWalletSdk(circleAppId);
-      await sdk.getDeviceId();
+      const sdk = await prepareWalletSdk(circleAppId);
       sdk.setAuthentication({ userToken, encryptionKey });
 
       await new Promise<void>((resolve, reject) => {

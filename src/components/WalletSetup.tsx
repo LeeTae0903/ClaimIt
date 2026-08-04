@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getWalletSdk } from "@/lib/circle/wallet-sdk";
+import { getWalletSdk, prepareWalletSdk } from "@/lib/circle/wallet-sdk";
 
 type WalletInfo = { id: string; address: string; blockchain: string };
 
@@ -58,8 +58,7 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
             });
             return;
           }
-          const sdk = getWalletSdk(data.circleAppId);
-          await sdk.getDeviceId();
+          await prepareWalletSdk(data.circleAppId);
           setState({ phase: "needs-pin", data });
         }
       } catch (err) {
