@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { isAddress } from "viem";
 import { useSession } from "@/lib/auth-client";
 
 type PublicLinkInfo =
@@ -22,6 +23,8 @@ export function ClaimPageClient({ token }: { token: string }) {
   const { data: session, isPending: sessionPending } = useSession();
 
   const [info, setInfo] = useState<PublicLinkInfo | null>(null);
+  const [address, setAddress] = useState("");
+  const [prefilled, setPrefilled] = useState(false);
   const [password, setPassword] = useState("");
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +39,22 @@ export function ClaimPageClient({ token }: { token: string }) {
       .catch(() => setInfo({ found: false }));
   }, [token]);
 
+  // If the visitor happens to already have a wallet here, offer it rather
+  // than making them go and copy their own address. Still editable — they may
+  // want the money somewhere else entirely.
+  useEffect(() => {
+    fetch("/api/wallet")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const own = data?.wallets?.[0]?.address;
+        if (own) {
+          setAddress(own);
+          setPrefilled(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   async function handleClaim(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -45,7 +64,10 @@ export function ClaimPageClient({ token }: { token: string }) {
       const res = await fetch(`/api/links/${token}/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: password || undefined }),
+        body: JSON.stringify({
+          toAddress: address.trim() || undefined,
+          password: password || undefined,
+        }),
       });
       const data = await res.json();
 
@@ -111,6 +133,12 @@ export function ClaimPageClient({ token }: { token: string }) {
     );
   }
 
+  const trimmedAddress = address.trim();
+  const addressValid = isAddress(trimmedAddress);
+  // Only complain once they've typed something long enough to be a real
+  // attempt — flagging "invalid" at the first character is just noise.
+  const showAddressError = trimmedAddress.length >= 10 && !addressValid;
+
   if (!info || sessionPending) return <ClaimSkeleton />;
 
   if (!info.found) {
@@ -163,47 +191,73 @@ export function ClaimPageClient({ token }: { token: string }) {
           <span className="ml-2 text-xl font-normal text-muted">USDC</span>
         </p>
 
-        {!session ? (
-          <div className="mt-8 space-y-3">
+        <form onSubmit={handleClaim} className="mt-8 space-y-4">
+          <div className="text-left">
+            <label className="field-label">Send it to</label>
+            <input
+              type="text"
+              required
+              spellCheck={false}
+              autoComplete="off"
+              value={address}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                setPrefilled(false);
+              }}
+              placeholder="0x… your wallet address on Arc"
+              className="field font-mono text-sm"
+            />
+            <p
+              className={`mt-2 text-xs leading-relaxed ${
+                showAddressError ? "text-bad" : "text-faint"
+              }`}
+            >
+              {showAddressError
+                ? "That isn't a valid address. Check every character — a payout can't be undone."
+                : prefilled
+                  ? "This is your wallet. Change it if you want the money elsewhere."
+                  : "Double-check it. The transfer is final and goes wherever this points."}
+            </p>
+          </div>
+
+          {info.hasPassword && (
+            <div className="text-left">
+              <label className="field-label">Password required</label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter the sender's password"
+                className="field"
+              />
+            </div>
+          )}
+
+          {error && (
+            <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={claiming || !addressValid}
+            className="btn btn-primary"
+          >
+            {claiming ? "Claiming…" : `Claim ${formatUsdc(info.amountMicros)} USDC`}
+          </button>
+
+          {!session && (
             <button
               type="button"
               onClick={() => router.push(`/sign-in?redirect=/claim/${token}`)}
-              className="btn btn-primary"
+              className="btn-quiet"
             >
-              Sign in to claim
+              I don&apos;t have a wallet — create one for me
             </button>
-            <p className="text-xs leading-relaxed text-faint">
-              No wallet needed — one is created for you if you don&apos;t have
-              one.
-            </p>
-          </div>
-        ) : (
-          <form onSubmit={handleClaim} className="mt-8 space-y-3">
-            {info.hasPassword && (
-              <div className="text-left">
-                <label className="field-label">Password required</label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter the sender's password"
-                  className="field"
-                />
-              </div>
-            )}
-            {error && (
-              <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">
-                {error}
-              </p>
-            )}
-            <button type="submit" disabled={claiming} className="btn btn-primary">
-              {claiming
-                ? "Claiming…"
-                : `Claim ${formatUsdc(info.amountMicros)} USDC`}
-            </button>
-          </form>
-        )}
+          )}
+        </form>
       </div>
     </div>
   );

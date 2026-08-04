@@ -7,6 +7,7 @@ import {
   TooManyAttemptsError,
   AlreadyClaimedError,
   NoWalletError,
+  InvalidAddressError,
 } from "@/server/services/claim-service";
 
 // The payout waits up to 15s for Circle to reach COMPLETE (compliance
@@ -24,10 +25,11 @@ export async function POST(
   request: NextRequest,
   ctx: RouteContext<"/api/links/[token]/claim">,
 ) {
+  // No session required. The link itself is the bearer credential — that's
+  // the product, not an oversight — so demanding an account only added a step
+  // between someone receiving a link and being paid. A session is still used
+  // when present, so the claim shows up in that account's activity.
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
 
   const { token } = await ctx.params;
   const body = await request.json().catch(() => ({}));
@@ -35,7 +37,8 @@ export async function POST(
   try {
     const result = await claimPaymentLink({
       token,
-      claimantId: session.user.id,
+      claimantId: session?.user.id,
+      toAddress: body.toAddress,
       password: body.password,
       ipAddress: clientIp(request),
       userAgent: request.headers.get("user-agent") ?? "unknown",
@@ -48,6 +51,9 @@ export async function POST(
       toAddress: result.toAddress,
     });
   } catch (err) {
+    if (err instanceof InvalidAddressError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     if (err instanceof NoWalletError) {
       return NextResponse.json(
         { error: err.message, code: "NO_WALLET" },

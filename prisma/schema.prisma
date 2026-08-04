@@ -162,7 +162,13 @@ enum ClaimStatus {
 model Claim {
   id            String      @id @default(cuid())
   paymentLinkId String      @unique
-  claimantId    String
+  // Nullable because claiming no longer requires an account: a recipient can
+  // supply a payout address directly. Set only when the claimer was signed
+  // in, which is what the dashboard's "received" tab scopes on.
+  claimantId    String?
+  // Where the payout actually went. Recorded per claim rather than derived
+  // from the claimant's wallet, since the two are no longer the same thing.
+  toAddress     String
   status        ClaimStatus @default(PENDING)
   circleTxId    String?
   failReason    String?
@@ -171,7 +177,7 @@ model Claim {
   createdAt     DateTime    @default(now())
 
   paymentLink PaymentLink @relation(fields: [paymentLinkId], references: [id])
-  claimant    User        @relation(fields: [claimantId], references: [id])
+  claimant    User?       @relation(fields: [claimantId], references: [id])
 
   @@index([claimantId])
 }

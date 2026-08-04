@@ -1,3 +1,4 @@
+import { getAddress, isAddress } from "viem";
 import { db } from "@/lib/db";
 import { hashClaimToken } from "@/lib/claim-token";
 import { verifyPassword } from "@/lib/password";
@@ -6,6 +7,15 @@ import { circleDeveloperClient } from "@/lib/circle/developer-wallets";
 import { NoWalletError } from "@/server/services/payment-link-service";
 
 export { NoWalletError };
+
+export class InvalidAddressError extends Error {
+  constructor() {
+    super(
+      "That doesn't look like a valid wallet address. Check it carefully — a payout can't be reversed.",
+    );
+    this.name = "InvalidAddressError";
+  }
+}
 
 const PASSWORD_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const MAX_PASSWORD_ATTEMPTS = 5;
@@ -108,12 +118,20 @@ async function auditLog(data: {
 export async function claimPaymentLink({
   token,
   claimantId,
+  toAddress,
   password,
   ipAddress,
   userAgent,
 }: {
   token: string;
-  claimantId: string;
+  /** Set only when the claimer is signed in. Claiming doesn't require it. */
+  claimantId?: string;
+  /**
+   * Where to send the payout. When omitted, falls back to the signed-in
+   * claimer's own wallet — the original flow, kept so someone with no wallet
+   * at all can still be given one rather than being turned away.
+   */
+  toAddress?: string;
   password?: string;
   ipAddress: string;
   userAgent: string;
@@ -167,11 +185,27 @@ export async function claimPaymentLink({
     }
   }
 
-  const claimantWallet = await db.wallet.findFirst({
-    where: { userId: claimantId, role: "PERSONAL" },
-  });
-  if (!claimantWallet) {
-    throw new NoWalletError();
+  // A supplied address wins over the claimer's own wallet: someone who pasted
+  // an address meant that address, even if they happen to be signed in with a
+  // wallet of their own. Validated with a checksummed parse rather than a
+  // shape check — a payout to a mistyped address is unrecoverable, and the
+  // checksum is the only thing standing between a typo and a permanent loss.
+  let payoutAddress: string;
+  if (toAddress) {
+    if (!isAddress(toAddress)) {
+      throw new InvalidAddressError();
+    }
+    payoutAddress = getAddress(toAddress);
+  } else {
+    const claimantWallet = claimantId
+      ? await db.wallet.findFirst({
+          where: { userId: claimantId, role: "PERSONAL" },
+        })
+      : null;
+    if (!claimantWallet) {
+      throw new NoWalletError();
+    }
+    payoutAddress = claimantWallet.address;
   }
 
   // The unique constraint on Claim.paymentLinkId is the actual double-claim
@@ -182,7 +216,8 @@ export async function claimPaymentLink({
     claim = await db.claim.create({
       data: {
         paymentLinkId: link.id,
-        claimantId,
+        claimantId: claimantId ?? null,
+        toAddress: payoutAddress,
         status: "PENDING",
         ipAddress,
         userAgent,
@@ -200,7 +235,7 @@ export async function claimPaymentLink({
     const { circleTxId } = await payoutFromTreasury({
       paymentLinkId: link.id,
       treasuryCircleWalletId: treasuryWallet.circleWalletId,
-      toAddress: claimantWallet.address,
+      toAddress: payoutAddress,
       amountMicros: link.amountMicros,
     });
 
@@ -248,7 +283,7 @@ export async function claimPaymentLink({
       amountMicros: link.amountMicros,
       circleTxId,
       txHash: tx.txHash ?? null,
-      toAddress: claimantWallet.address,
+      toAddress: payoutAddress,
     };
   } catch (err) {
     const failReason = err instanceof Error ? err.message : String(err);
