@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 import { LogoMark, Wordmark } from "@/components/Brand";
+import { AccountMenu } from "@/components/AccountMenu";
 
 /**
  * Page chrome shared by every route: a hairline sticky header and a centred
@@ -10,11 +11,14 @@ import { LogoMark, Wordmark } from "@/components/Brand";
 export function Shell({
   children,
   action,
+  account = false,
   width = "narrow",
   center = false,
 }: {
   children: ReactNode;
   action?: ReactNode;
+  /** Show the account menu (wallet address, sign out) for signed-in pages. */
+  account?: boolean;
   width?: "narrow" | "wide";
   center?: boolean;
 }) {
@@ -26,7 +30,10 @@ export function Shell({
             <LogoMark className="h-6 w-6" />
             <Wordmark />
           </Link>
-          {action}
+          <div className="flex items-center gap-2">
+            {action}
+            {account && <AccountMenu />}
+          </div>
         </div>
       </header>
 

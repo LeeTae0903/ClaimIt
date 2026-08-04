@@ -85,7 +85,17 @@ export function ClaimPageClient({ token }: { token: string }) {
             {formatUsdc(result.amountMicros)}
             <span className="ml-2 text-lg font-normal text-muted">USDC</span>
           </p>
-          <p className="mt-3 text-sm text-muted">It&apos;s in your wallet now.</p>
+          <p className="mt-3 text-sm text-muted">
+            It&apos;s in your wallet now. Open the account menu above to see
+            the address.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="btn btn-ghost mt-7"
+          >
+            View my activity
+          </button>
         </div>
         {result.txHash && (
           <a

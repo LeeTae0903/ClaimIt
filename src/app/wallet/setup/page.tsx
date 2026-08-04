@@ -15,7 +15,7 @@ export default async function WalletSetupPage({
   const { redirect: redirectTo } = await searchParams;
 
   return (
-    <Shell center>
+    <Shell account center>
       <div className="space-y-6">
         <div>
           <span className="eyebrow">Setup</span>

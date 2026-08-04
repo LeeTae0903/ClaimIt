@@ -52,8 +52,23 @@ export const auth = betterAuth({
       appBundleIdentifier: process.env.APPLE_APP_BUNDLE_IDENTIFIER,
     }),
   },
-  // Required for Sign In with Apple's redirect flow to be trusted.
-  trustedOrigins: ["https://appleid.apple.com"],
+  // appleid.apple.com is required for Sign In with Apple's redirect flow.
+  // The Vercel hosts are there because Better Auth's origin check rejects
+  // any request whose Origin isn't baseURL or listed here — and it only
+  // bites once a session cookie exists, so a misconfigured BETTER_AUTH_URL
+  // looks like "sign-in works, then everything 403s" rather than an
+  // outright failure. Vercel sets these three itself, so the deployment
+  // trusts its own hostnames whatever BETTER_AUTH_URL happens to say.
+  trustedOrigins: [
+    "https://appleid.apple.com",
+    ...[
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+      process.env.VERCEL_URL,
+      process.env.VERCEL_BRANCH_URL,
+    ]
+      .filter((host): host is string => !!host)
+      .map((host) => `https://${host}`),
+  ],
   advanced: {
     backgroundTasks: {
       // Hands the send to Next's `after()` so the response still goes out

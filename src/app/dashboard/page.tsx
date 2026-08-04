@@ -9,7 +9,7 @@ export default async function DashboardPage() {
   if (!session) redirect("/sign-in?redirect=/dashboard");
 
   return (
-    <Shell action={<ShellAction href="/links/new" label="Send USDC" />}>
+    <Shell account action={<ShellAction href="/links/new" label="Send USDC" />}>
       <div className="space-y-6">
         <div>
           <span className="eyebrow">Your account</span>

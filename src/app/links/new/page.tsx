@@ -9,7 +9,7 @@ export default async function NewLinkPage() {
   if (!session) redirect("/sign-in?redirect=/links/new");
 
   return (
-    <Shell action={<ShellAction href="/dashboard" label="Activity" />}>
+    <Shell account action={<ShellAction href="/dashboard" label="Activity" />}>
       <div className="space-y-7">
         <div>
           <span className="eyebrow">New link</span>

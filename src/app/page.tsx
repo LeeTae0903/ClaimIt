@@ -46,6 +46,7 @@ export default async function Home() {
   return (
     <Shell
       width="wide"
+      account={!!session}
       action={
         session ? (
           <ShellAction href="/dashboard" label="Activity" />

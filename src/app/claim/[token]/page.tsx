@@ -9,7 +9,7 @@ export default async function ClaimPage({
   const { token } = await params;
 
   return (
-    <Shell center>
+    <Shell account center>
       <ClaimPageClient token={token} />
     </Shell>
   );
