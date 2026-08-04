@@ -225,15 +225,23 @@ export async function findDepositTransaction({
   throw new DepositNotIndexedYetError();
 }
 
-export async function recordTransaction(data: {
-  paymentLinkId: string;
-  type: "DEPOSIT" | "PAYOUT" | "REFUND";
-  circleTxId: string;
-  fromAddress: string;
-  toAddress: string;
-  amountMicros: bigint;
-  status: string;
-}) {
+export async function recordTransaction(
+  data: {
+    type: "DEPOSIT" | "PAYOUT" | "REFUND";
+    circleTxId: string;
+    fromAddress: string;
+    toAddress: string;
+    amountMicros: bigint;
+    status: string;
+  } & (
+    // A payout belongs to one link; a batch deposit funds many at once and so
+    // belongs to the batch. The database enforces the same either/or with a
+    // CHECK constraint — this type just makes it impossible to get wrong from
+    // TypeScript in the first place.
+    | { paymentLinkId: string; batchId?: never }
+    | { batchId: string; paymentLinkId?: never }
+  ),
+) {
   return db.transaction.create({ data });
 }
 

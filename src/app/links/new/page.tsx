@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { CreateLinkForm } from "@/components/CreateLinkForm";
+import { CreateModeSwitch } from "@/components/CreateModeSwitch";
 import { Shell, ShellAction } from "@/components/Shell";
 
 export default async function NewLinkPage() {
@@ -15,10 +15,11 @@ export default async function NewLinkPage() {
           <span className="eyebrow">New link</span>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Send USDC</h1>
           <p className="mt-1.5 text-sm text-muted">
-            Escrow an amount now; whoever opens the link claims it.
+            Escrow an amount now; whoever opens the link claims it. Split it
+            across many links for a giveaway.
           </p>
         </div>
-        <CreateLinkForm />
+        <CreateModeSwitch />
       </div>
     </Shell>
   );

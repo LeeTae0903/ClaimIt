@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { reconcilePendingDeposits } from "@/server/services/payment-link-service";
+import { reconcilePendingBatches } from "@/server/services/batch-service";
 
 // Reconciliation can walk several stale deposits, each hitting Circle.
 export const maxDuration = 60;
@@ -16,8 +17,13 @@ async function handle(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results = await reconcilePendingDeposits();
-  return NextResponse.json({ results });
+  // Batches are swept too: a giveaway that never confirmed leaves the same
+  // stranded-escrow problem as a single link, just multiplied.
+  const [links, batches] = await Promise.all([
+    reconcilePendingDeposits(),
+    reconcilePendingBatches(),
+  ]);
+  return NextResponse.json({ results: links, batches });
 }
 
 // Vercel Cron only ever issues GET, and injects `Authorization: Bearer
