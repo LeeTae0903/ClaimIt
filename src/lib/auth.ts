@@ -1,7 +1,9 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
-import { anonymous, emailOTP } from "better-auth/plugins";
+import { anonymous, emailOTP, siwe } from "better-auth/plugins";
+import { generateSiweNonce } from "viem/siwe";
+import { arcPublicClient } from "@/lib/chain/arc";
 import { importPKCS8, SignJWT } from "jose";
 import { after } from "next/server";
 import { db } from "@/lib/db";
@@ -16,6 +18,26 @@ const APPLE_ENV_VARS = [
 
 function appleConfigured() {
   return APPLE_ENV_VARS.every((name) => !!process.env[name]);
+}
+
+/**
+ * The host a SIWE message must name.
+ *
+ * The browser signs a message containing `window.location.host`, and the
+ * plugin rejects the signature unless it matches this exactly — so this has to
+ * be the host people actually browse, not whatever BETTER_AUTH_URL happens to
+ * say. Vercel provides the production hostname itself; locally it comes from
+ * BETTER_AUTH_URL.
+ */
+function appHost(): string {
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  }
+  try {
+    return new URL(process.env.BETTER_AUTH_URL ?? "http://localhost:3000").host;
+  } catch {
+    return "localhost:3000";
+  }
 }
 
 async function appleClientSecret() {
@@ -90,6 +112,24 @@ export const auth = betterAuth({
       },
     }),
     anonymous(),
+    siwe({
+      domain: appHost(),
+      // No email step: proving control of the address is the whole sign-in.
+      // Better Auth still needs a unique email internally, and derives one
+      // from the address plus this domain.
+      anonymous: true,
+      emailDomainName: appHost(),
+      getNonce: async () => generateSiweNonce(),
+      // Verified through the chain's own client rather than a plain ECDSA
+      // recover, so smart-contract accounts (ERC-1271) work too — those can't
+      // be checked off-chain at all.
+      verifyMessage: async ({ message, signature, address }) =>
+        arcPublicClient.verifyMessage({
+          address: address as `0x${string}`,
+          message,
+          signature: signature as `0x${string}`,
+        }),
+    }),
     // Must stay last: lets server actions calling auth.api.* set cookies.
     nextCookies(),
   ],

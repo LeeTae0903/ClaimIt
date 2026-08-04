@@ -1,6 +1,7 @@
 "use client";
 
 import { createWalletClient, custom, getAddress } from "viem";
+import { createSiweMessage } from "viem/siwe";
 import { ARC_USDC_ADDRESS, ERC20_ABI, arcTestnet, arcPublicClient } from "@/lib/chain/arc";
 
 type Eip1193Provider = {
@@ -103,6 +104,68 @@ export async function getUsdcBalanceMicros(address: string): Promise<bigint> {
     functionName: "balanceOf",
     args: [getAddress(address)],
   });
+}
+
+/**
+ * Signs in with the connected wallet (EIP-4361).
+ *
+ * The message is built here, in the browser, from `window.location.host` —
+ * and the server rejects the signature unless that host matches the domain it
+ * expects, which is what stops a message signed for another site being
+ * replayed here. The nonce is single-use and consumed server-side.
+ */
+export async function signInWithWallet(): Promise<void> {
+  const address = await connectWallet();
+  await ensureArcChain();
+
+  const nonceRes = await fetch("/api/auth/siwe/nonce", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ walletAddress: address, chainId: arcTestnet.id }),
+  });
+  if (!nonceRes.ok) throw new Error("Couldn't start wallet sign-in.");
+  const { nonce } = (await nonceRes.json()) as { nonce: string };
+
+  const message = createSiweMessage({
+    address: getAddress(address),
+    chainId: arcTestnet.id,
+    domain: window.location.host,
+    nonce,
+    uri: window.location.origin,
+    version: "1",
+    statement: "Sign in to claimIT. This does not move any funds.",
+  });
+
+  const walletClient = createWalletClient({
+    chain: arcTestnet,
+    transport: custom(provider()),
+  });
+
+  let signature: string;
+  try {
+    signature = await walletClient.signMessage({
+      account: getAddress(address),
+      message,
+    });
+  } catch (err) {
+    if (isUserRejection(err)) throw new WalletRejectedError();
+    throw err;
+  }
+
+  const verifyRes = await fetch("/api/auth/siwe/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      signature,
+      walletAddress: address,
+      chainId: arcTestnet.id,
+    }),
+  });
+  if (!verifyRes.ok) {
+    const data = await verifyRes.json().catch(() => ({}));
+    throw new Error(data.message ?? "Wallet sign-in was rejected.");
+  }
 }
 
 /** Signs and broadcasts the USDC transfer into escrow. Returns its hash. */

@@ -35,8 +35,9 @@ model User {
   // right after, via a Better Auth database hook (see Milestone 4).
   circleUserId String?       @unique
   wallets      Wallet[]
-  sentLinks    PaymentLink[] @relation("SentLinks")
-  sentBatches  LinkBatch[]   @relation("SentBatches")
+  sentLinks      PaymentLink[]   @relation("SentLinks")
+  sentBatches    LinkBatch[]     @relation("SentBatches")
+  walletAddresses WalletAddress[]
   claims       Claim[]
   auditLogs    AuditLog[]
 
@@ -78,6 +79,26 @@ model Account {
 
   @@index([userId])
   @@map("account")
+}
+
+/// Owned by Better Auth's siwe plugin, which addresses it as `walletAddress`
+/// — the Prisma model name has to stay WalletAddress for `prisma.walletAddress`
+/// to resolve. Distinct from the domain `Wallet` model: this records "this
+/// address proves this account's identity", not "this is a wallet we can move
+/// funds through".
+model WalletAddress {
+  id        String   @id
+  userId    String
+  address   String
+  chainId   Int
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([address, chainId])
+  @@index([userId])
+  @@map("walletAddress")
 }
 
 model Verification {

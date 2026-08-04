@@ -6,6 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { SocialSignInButton } from "@/components/SocialSignInButton";
 import { Shell } from "@/components/Shell";
 import { LogoMark } from "@/components/Brand";
+import { signInWithWallet } from "@/lib/wallet/connect";
 
 function GoogleIcon() {
   return (
@@ -26,6 +27,21 @@ function GoogleIcon() {
         fill="#EA4335"
         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1a11 11 0 0 0-9.82 6.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z"
       />
+    </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
+      <path
+        d="M3 8.5A2.5 2.5 0 0 1 5.5 6H18a2 2 0 0 1 2 2v1M3 8.5V17a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2.5M3 8.5h15.5"
+        stroke="#4d9bf0"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="16.5" cy="12.5" r="1.4" fill="#4d9bf0" />
     </svg>
   );
 }
@@ -52,6 +68,18 @@ function SignInForm() {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function withWallet() {
+    setError(null);
+    setLoading("wallet");
+    try {
+      await signInWithWallet();
+      router.push(redirectTo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Wallet sign-in failed.");
+      setLoading(null);
+    }
+  }
 
   async function withGoogle() {
     setError(null);
@@ -120,6 +148,16 @@ function SignInForm() {
     <>
       <div className="space-y-8">
         <div className="space-y-3">
+          {/* First, because on a USDC app the wallet is usually the identity
+              people already have — and it doubles as the funding source. */}
+          <SocialSignInButton
+            onClick={withWallet}
+            disabled={loading !== null}
+            icon={<WalletIcon />}
+            label={
+              loading === "wallet" ? "Check your wallet…" : "Continue with wallet"
+            }
+          />
           <SocialSignInButton
             onClick={withGoogle}
             disabled={loading !== null}
