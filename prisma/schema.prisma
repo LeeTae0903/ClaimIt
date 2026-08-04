@@ -151,6 +151,7 @@ model LinkBatch {
   linkCount        Int
   status           BatchStatus @default(PENDING_DEPOSIT)
   refId            String?     @unique
+  externalTxHash   String?     @unique
   depositTxId      String?
   /// What actually arrived on-chain, which is the number that matters if it
   /// ever disagrees with totalMicros.
@@ -180,6 +181,10 @@ model PaymentLink {
   // it to find the transaction if the synchronous confirm never completes.
   // Null for links funded as part of a batch — the batch holds the refId.
   refId            String?    @unique
+  // Set instead of refId when the sender funded this from their own wallet
+  // rather than through Circle. Unique so one on-chain transfer can't be
+  // presented as the deposit for two different links.
+  externalTxHash   String?    @unique
   batchId          String?
   createdAt        DateTime   @default(now())
   claimedAt        DateTime?
@@ -237,7 +242,12 @@ model Transaction {
   paymentLinkId String?
   batchId       String?
   type          TxType
-  circleTxId    String   @unique
+  // Circle-mediated transfers have a Circle id; a deposit signed by the
+  // sender's own wallet only has an on-chain hash. At least one is always
+  // present, and both are unique — claiming the hash is what stops the same
+  // transfer being replayed as a second deposit.
+  circleTxId    String?  @unique
+  onchainTxHash String?  @unique
   fromAddress   String
   toAddress     String
   amountMicros  BigInt

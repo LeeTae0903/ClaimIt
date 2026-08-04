@@ -7,6 +7,8 @@ import {
   DepositNotIndexedYetError,
 } from "@/server/services/transfer-service";
 import { generateClaimToken, hashClaimToken } from "@/lib/claim-token";
+import { Prisma } from "@/generated/prisma/client";
+import { verifyUsdcDeposit } from "@/server/services/onchain-deposit";
 
 export const MIN_LINK_AMOUNT_MICROS = 100_000n; // $0.10 — keeps gas cost from dominating tiny links
 
@@ -166,6 +168,134 @@ export async function confirmLinkDeposit({
   });
 
   return { linkId: updated.id, amountMicros: updated.amountMicros };
+}
+
+export class DepositAlreadyUsedError extends Error {
+  constructor() {
+    super("That transaction has already been used to fund a link.");
+    this.name = "DepositAlreadyUsedError";
+  }
+}
+
+/**
+ * Creates a link the sender will fund from their own wallet.
+ *
+ * No Circle challenge and no sender wallet needed — the row exists first (the
+ * same PENDING_DEPOSIT ordering as every other path), and the caller is told
+ * which treasury address to pay. Nothing is claimable until a real transfer
+ * to that address is verified.
+ */
+export async function prepareExternalLink({
+  senderId,
+  amountMicros,
+  passwordHash,
+  expiresAt,
+}: {
+  senderId: string;
+  amountMicros: bigint;
+  passwordHash: string | null;
+  expiresAt: Date | null;
+}) {
+  if (amountMicros < MIN_LINK_AMOUNT_MICROS) {
+    throw new Error(`Amount must be at least ${MIN_LINK_AMOUNT_MICROS} micros`);
+  }
+
+  const treasuries = await db.wallet.findMany({ where: { role: "TREASURY" } });
+  if (treasuries.length === 0) throw new Error("No treasury wallets configured");
+  const treasury = treasuries[Math.floor(Math.random() * treasuries.length)];
+
+  const rawToken = generateClaimToken();
+  const link = await db.paymentLink.create({
+    data: {
+      tokenHash: hashClaimToken(rawToken),
+      senderId,
+      treasuryWalletId: treasury.id,
+      amountMicros,
+      status: "PENDING_DEPOSIT",
+      passwordHash,
+      expiresAt,
+    },
+  });
+
+  return {
+    linkId: link.id,
+    rawToken,
+    treasuryAddress: treasury.address,
+    amountMicros,
+  };
+}
+
+/**
+ * Activates an externally funded link against a verified on-chain transfer.
+ *
+ * The activation and the transaction record go in one database transaction so
+ * both unique constraints on the hash apply together: a hash already spent on
+ * another link — or on a batch — can't slip through between the two writes.
+ * That constraint, not a lookup-then-write check, is the replay guard, for
+ * the same reason the double-claim guard is a constraint.
+ */
+export async function confirmExternalLink({
+  senderId,
+  linkId,
+  txHash,
+}: {
+  senderId: string;
+  linkId: string;
+  txHash: string;
+}) {
+  const link = await db.paymentLink.findUnique({ where: { id: linkId } });
+  if (!link) throw new LinkNotFoundError();
+  if (link.senderId !== senderId) throw new LinkOwnershipError();
+
+  if (link.status === "ACTIVE") {
+    return { linkId: link.id, amountMicros: link.amountMicros };
+  }
+  if (link.status !== "PENDING_DEPOSIT") {
+    throw new Error(`Link is not awaiting a deposit (status: ${link.status})`);
+  }
+
+  const treasury = await db.wallet.findUniqueOrThrow({
+    where: { id: link.treasuryWalletId },
+  });
+
+  const deposit = await verifyUsdcDeposit({
+    txHash,
+    treasuryAddress: treasury.address,
+    minAmountMicros: link.amountMicros,
+  });
+
+  try {
+    const [updated] = await db.$transaction([
+      db.paymentLink.update({
+        where: { id: link.id },
+        data: {
+          status: "ACTIVE",
+          amountMicros: deposit.amountMicros,
+          externalTxHash: txHash,
+        },
+      }),
+      db.transaction.create({
+        data: {
+          paymentLinkId: link.id,
+          type: "DEPOSIT",
+          onchainTxHash: txHash,
+          fromAddress: deposit.fromAddress,
+          toAddress: treasury.address,
+          amountMicros: deposit.amountMicros,
+          status: "COMPLETE",
+        },
+      }),
+    ]);
+    return { linkId: updated.id, amountMicros: updated.amountMicros };
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      throw new DepositAlreadyUsedError();
+    }
+    throw err;
+  }
 }
 
 /**
