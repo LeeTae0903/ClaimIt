@@ -41,7 +41,15 @@ export async function POST(request: NextRequest) {
       userToken,
     });
 
-    const response = NextResponse.json(result);
+    // amountMicros is a Prisma BigInt and JSON.stringify throws on those, so
+    // returning the service result as-is made a fully successful confirm
+    // answer 500: the deposit was recorded and the link promoted to ACTIVE,
+    // then serialising the reply crashed. Every other route converts at this
+    // same boundary; this one didn't.
+    const response = NextResponse.json({
+      linkId: result.linkId,
+      amountMicros: result.amountMicros.toString(),
+    });
     clearUserTokenCookie(response);
     return response;
   } catch (err) {
@@ -63,6 +71,10 @@ export async function POST(request: NextRequest) {
     if (err instanceof LinkOwnershipError) {
       return NextResponse.json({ error: err.message }, { status: 403 });
     }
+    // Logged because this branch is otherwise a dead end: the client is told
+    // "couldn't confirm" with no way to tell a genuine failure from one where
+    // the deposit actually landed.
+    console.error("[links/confirm] unexpected failure:", err);
     return NextResponse.json(
       { error: "Couldn't confirm the deposit.", retryable: false },
       { status: 500 },
