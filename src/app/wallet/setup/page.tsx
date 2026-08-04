@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { WalletSetup } from "@/components/WalletSetup";
+import { Shell } from "@/components/Shell";
 
 export default async function WalletSetupPage({
   searchParams,
@@ -14,16 +15,19 @@ export default async function WalletSetupPage({
   const { redirect: redirectTo } = await searchParams;
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-12">
-      <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Your wallet</h1>
-          <p className="text-sm text-black/60 dark:text-white/60">
-            Used to send and receive USDC on Arc Testnet.
+    <Shell center>
+      <div className="space-y-6">
+        <div>
+          <span className="eyebrow">Setup</span>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+            Your wallet
+          </h1>
+          <p className="mt-1.5 text-sm text-muted">
+            Non-custodial, on Arc Testnet. Used to send and receive USDC.
           </p>
         </div>
         <WalletSetup redirectTo={redirectTo} />
       </div>
-    </div>
+    </Shell>
   );
 }

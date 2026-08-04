@@ -1,4 +1,5 @@
 import { ClaimPageClient } from "@/components/ClaimPageClient";
+import { Shell } from "@/components/Shell";
 
 export default async function ClaimPage({
   params,
@@ -8,10 +9,8 @@ export default async function ClaimPage({
   const { token } = await params;
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-12">
-      <div className="mx-auto w-full max-w-sm">
-        <ClaimPageClient token={token} />
-      </div>
-    </div>
+    <Shell center>
+      <ClaimPageClient token={token} />
+    </Shell>
   );
 }

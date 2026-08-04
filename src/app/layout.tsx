@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "claimIT",
-  description: "Secure USDC payment links — deposit, share, claim.",
+  title: "claimIT — USDC payment links",
+  description:
+    "Escrow USDC behind a link and send it like a message. Whoever opens it claims the exact amount — no wallet required to receive.",
 };
 
 export default function RootLayout({
@@ -27,7 +28,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-bg text-ink">
+        <div className="backdrop" aria-hidden />
+        {children}
+      </body>
     </html>
   );
 }

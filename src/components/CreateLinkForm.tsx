@@ -52,6 +52,14 @@ export function CreateLinkForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimUrl, setClaimUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copyClaimUrl() {
+    if (!claimUrl) return;
+    await navigator.clipboard.writeText(claimUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -104,83 +112,118 @@ export function CreateLinkForm() {
 
   if (claimUrl) {
     return (
-      <div className="space-y-6 text-center">
-        <p className="text-sm font-medium text-black/70 dark:text-white/70">
-          Your link is ready
-        </p>
-        <div className="flex justify-center rounded-2xl bg-white p-6">
-          <QRCodeSVG value={claimUrl} size={200} />
+      <div className="space-y-6">
+        <div className="text-center">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-ok/12 text-ok">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden>
+              <path
+                d="m5 12.5 4.5 4.5L19 7.5"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <h2 className="mt-4 text-xl font-semibold tracking-tight">
+            Link funded and ready
+          </h2>
+          <p className="mt-2 text-sm text-muted">
+            The USDC is in escrow. The first person to open this link claims it.
+          </p>
         </div>
-        <div className="break-all rounded-xl border border-black/10 px-4 py-3 font-mono text-xs dark:border-white/15">
-          {claimUrl}
+
+        <div className="card overflow-hidden">
+          <div className="flex justify-center bg-white p-6">
+            <QRCodeSVG value={claimUrl} size={188} />
+          </div>
+          <div className="border-t border-line p-4">
+            <span className="eyebrow">Claim link</span>
+            <p className="mt-2 break-all font-mono text-xs leading-relaxed text-muted">
+              {claimUrl}
+            </p>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => navigator.clipboard.writeText(claimUrl)}
-          className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] dark:bg-white dark:text-black"
-        >
-          Copy link
-        </button>
+
+        <div className="space-y-3">
+          <button type="button" onClick={copyClaimUrl} className="btn btn-primary">
+            {copied ? "Copied to clipboard" : "Copy link"}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="btn btn-ghost"
+          >
+            View activity
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Amount (USDC)
-        </label>
-        <input
-          type="number"
-          min="0.1"
-          step="0.01"
-          required
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="50.00"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-        />
+        <label className="field-label">Amount</label>
+        <div className="relative">
+          <input
+            type="number"
+            min="0.1"
+            step="0.01"
+            required
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="50.00"
+            className="field numeric pr-20 text-2xl"
+          />
+          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-mono text-sm text-faint">
+            USDC
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-faint">
+          The recipient receives this exact amount — gas is on us.
+        </p>
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Password (optional)
-        </label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Leave blank for none"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-        />
-      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label className="field-label">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="None"
+            className="field"
+          />
+        </div>
 
-      <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Expires in (hours, optional)
-        </label>
-        <input
-          type="number"
-          min="1"
-          value={expiresInHours}
-          onChange={(e) => setExpiresInHours(e.target.value)}
-          placeholder="Never"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-        />
+        <div>
+          <label className="field-label">Expires in (hours)</label>
+          <input
+            type="number"
+            min="1"
+            value={expiresInHours}
+            onChange={(e) => setExpiresInHours(e.target.value)}
+            placeholder="Never"
+            className="field numeric"
+          />
+        </div>
       </div>
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">
+          {error}
+        </p>
       )}
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
-      >
-        {loading ? "Creating…" : "Create claim link"}
+      <button type="submit" disabled={loading} className="btn btn-primary">
+        {loading ? "Waiting for authorisation…" : "Escrow and create link"}
       </button>
+
+      <p className="text-center text-xs leading-relaxed text-faint">
+        You&apos;ll authorise the transfer once in Circle&apos;s secure dialog.
+        The link only becomes claimable after the deposit confirms.
+      </p>
     </form>
   );
 }

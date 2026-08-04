@@ -109,29 +109,47 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
   }
 
   if (state.phase === "loading") {
-    return <p className="text-sm text-black/60 dark:text-white/60">Setting up your wallet…</p>;
+    return (
+      <div className="card animate-pulse px-6 py-12 text-center">
+        <div className="mx-auto h-3 w-40 rounded bg-line" />
+        <div className="mx-auto mt-4 h-2.5 w-56 rounded bg-line" />
+      </div>
+    );
   }
 
   if (state.phase === "error") {
-    return <p className="text-sm text-red-600 dark:text-red-400">{state.message}</p>;
+    return (
+      <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">
+        {state.message}
+      </p>
+    );
   }
 
   if (state.phase === "ready") {
     return (
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Wallet ready</p>
+      <div className="space-y-5">
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <span className="eyebrow">Wallet</span>
+            <span className="flex items-center gap-1.5 rounded-full bg-ok/10 px-2.5 py-1 font-mono text-[0.66rem] uppercase tracking-wider text-ok">
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+              ready
+            </span>
+          </div>
           {state.wallets.map((w) => (
-            <p key={w.id} className="font-mono text-xs text-black/60 dark:text-white/60">
-              {w.blockchain}: {w.address}
-            </p>
+            <div key={w.id} className="border-b border-line px-4 py-3.5 last:border-b-0">
+              <p className="eyebrow">{w.blockchain}</p>
+              <p className="mt-1.5 break-all font-mono text-xs leading-relaxed text-muted">
+                {w.address}
+              </p>
+            </div>
           ))}
         </div>
         {redirectTo && (
           <button
             type="button"
             onClick={() => router.push(redirectTo)}
-            className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] dark:bg-white dark:text-black"
+            className="btn btn-primary"
           >
             Continue
           </button>
@@ -141,13 +159,22 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={setUpPin}
-      disabled={state.phase === "setting-up"}
-      className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
-    >
-      {state.phase === "setting-up" ? "Setting up…" : "Set up your wallet"}
-    </button>
+    <div className="space-y-5">
+      <div className="card space-y-3 p-5">
+        <p className="text-sm leading-relaxed text-muted">
+          You&apos;ll set a PIN in Circle&apos;s secure dialog. It never reaches
+          claimIT — the wallet is yours, not ours, and the PIN is the only thing
+          that can move funds out of it.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={setUpPin}
+        disabled={state.phase === "setting-up"}
+        className="btn btn-primary"
+      >
+        {state.phase === "setting-up" ? "Waiting for PIN setup…" : "Set up your wallet"}
+      </button>
+    </div>
   );
 }

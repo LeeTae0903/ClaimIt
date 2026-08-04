@@ -4,6 +4,8 @@ import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { SocialSignInButton } from "@/components/SocialSignInButton";
+import { Shell } from "@/components/Shell";
+import { LogoMark } from "@/components/Brand";
 
 function GoogleIcon() {
   return (
@@ -32,7 +34,7 @@ function AppleIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-5 w-5 fill-black dark:fill-white"
+      className="h-5 w-5 fill-white"
       aria-hidden="true"
     >
       <path d="M16.36 1.4c0 1.14-.42 2.2-1.24 3.06-.85.9-2.13 1.6-3.24 1.5-.13-1.1.44-2.24 1.22-3.02.83-.86 2.28-1.5 3.26-1.54zM20.5 17.1c-.5 1.15-1.1 2.24-2 3.24-.9 1-1.79 1.99-3.2 2.01-1.36.03-1.8-.83-3.36-.83-1.55 0-2.05.8-3.34.86-1.36.05-2.4-1.08-3.31-2.08-1.85-2.05-3.28-5.79-1.37-8.32.94-1.26 2.6-2.06 4.4-2.09 1.32-.02 2.57.9 3.37.9.8 0 2.32-1.11 3.9-.95.66.03 2.53.27 3.73 2.02-.1.06-2.22 1.3-2.2 3.87.03 3.07 2.7 4.1 2.73 4.11-.02.06-.42 1.46-1.35 2.26z" />
@@ -115,15 +117,8 @@ function SignInForm() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-12">
-      <div className="mx-auto w-full max-w-sm space-y-8">
-        <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">claimIT</h1>
-          <p className="text-sm text-black/60 dark:text-white/60">
-            Sign in to send or claim USDC.
-          </p>
-        </div>
-
+    <>
+      <div className="space-y-8">
         <div className="space-y-3">
           <SocialSignInButton
             onClick={withGoogle}
@@ -139,10 +134,10 @@ function SignInForm() {
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-black/40 dark:text-white/40">
-          <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
-          or
-          <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-line" />
+          <span className="eyebrow">or</span>
+          <div className="h-px flex-1 bg-line" />
         </div>
 
         {step === "email" ? (
@@ -153,20 +148,17 @@ function SignInForm() {
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
+              className="field"
             />
-            <button
-              type="submit"
-              disabled={loading !== null}
-              className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
-            >
+            <button type="submit" disabled={loading !== null} className="btn btn-primary">
               {loading === "send-otp" ? "Sending code…" : "Continue with email"}
             </button>
           </form>
         ) : (
           <form onSubmit={verifyCode} className="space-y-3">
-            <p className="text-sm text-black/60 dark:text-white/60">
-              Enter the code sent to <span className="font-medium">{email}</span>
+            <p className="text-sm text-muted">
+              Enter the code sent to{" "}
+              <span className="font-medium text-ink">{email}</span>
             </p>
             <input
               type="text"
@@ -176,19 +168,15 @@ function SignInForm() {
               placeholder="123456"
               value={otp}
               onChange={(e) => setOtp(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-center text-lg tracking-[0.3em] outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
+              className="field numeric text-center text-lg tracking-[0.4em]"
             />
-            <button
-              type="submit"
-              disabled={loading !== null}
-              className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
-            >
+            <button type="submit" disabled={loading !== null} className="btn btn-primary">
               {loading === "verify-otp" ? "Verifying…" : "Verify code"}
             </button>
             <button
               type="button"
               onClick={() => setStep("email")}
-              className="w-full text-center text-sm text-black/50 dark:text-white/50"
+              className="btn-quiet"
             >
               Use a different email
             </button>
@@ -196,28 +184,60 @@ function SignInForm() {
         )}
 
         {error && (
-          <p className="text-center text-sm text-red-600 dark:text-red-400">
+          <p className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-center text-sm text-bad">
             {error}
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={asGuest}
-          disabled={loading !== null}
-          className="w-full text-center text-sm text-black/50 underline-offset-4 hover:underline disabled:opacity-50 dark:text-white/50"
-        >
-          {loading === "guest" ? "Continuing…" : "Continue as guest"}
-        </button>
+        <div className="border-t border-line pt-6">
+          <button
+            type="button"
+            onClick={asGuest}
+            disabled={loading !== null}
+            className="btn btn-ghost"
+          >
+            {loading === "guest" ? "Continuing…" : "Continue as guest"}
+          </button>
+          <p className="mt-3 text-center text-xs leading-relaxed text-faint">
+            A guest account is enough to claim a link. You can attach an email
+            later.
+          </p>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={null}>
-      <SignInForm />
-    </Suspense>
+    <Shell center>
+      <div className="space-y-8">
+        {/* Rendered on the server so the page never flashes empty chrome —
+            only the form itself waits on useSearchParams. */}
+        <div className="text-center">
+          <LogoMark className="mx-auto h-11 w-11" />
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight">
+            Sign in to claimIT
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            To send USDC, or to claim a link someone sent you.
+          </p>
+        </div>
+        <Suspense fallback={<SignInSkeleton />}>
+          <SignInForm />
+        </Suspense>
+      </div>
+    </Shell>
+  );
+}
+
+function SignInSkeleton() {
+  return (
+    <div className="animate-pulse space-y-3">
+      <div className="h-12 w-full rounded-xl bg-line" />
+      <div className="h-12 w-full rounded-xl bg-line" />
+      <div className="mx-auto h-3 w-8 rounded bg-line" />
+      <div className="h-12 w-full rounded-xl bg-line" />
+    </div>
   );
 }

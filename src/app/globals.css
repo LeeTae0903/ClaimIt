@@ -1,26 +1,113 @@
 @import "tailwindcss";
 
+/* Dark-only by choice, not by omission: this is a wallet-adjacent app and a
+   single committed palette keeps amounts, statuses and addresses reading the
+   same everywhere. `color-scheme` below tells the browser to match its own
+   controls (scrollbars, autofill, date pickers) to it. */
+@theme {
+  --color-bg: #08090b;
+  --color-surface: #0f1116;
+  --color-raised: #161920;
+  --color-line: #21252d;
+  --color-line-strong: #2e343f;
+
+  --color-ink: #e9ebef;
+  --color-muted: #8c94a1;
+  --color-faint: #5a626e;
+
+  --color-accent: #4d9bf0;
+  --color-accent-deep: #1d5fa8;
+
+  --color-ok: #3fb950;
+  --color-warn: #d29922;
+  --color-bad: #f85149;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient backdrop: a hairline grid that fades out downward, plus one cool
+   glow behind the top of the page. Fixed and non-interactive so it never
+   affects layout or swallows clicks. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, #ffffff08 1px, transparent 1px),
+    linear-gradient(to bottom, #ffffff08 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 100% 70% at 50% 0%, #000 30%, transparent 78%);
+}
+
+.backdrop::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -22rem;
+  height: 40rem;
+  width: 60rem;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+  background: radial-gradient(circle, #4d9bf033 0%, transparent 65%);
+  filter: blur(40px);
+}
+
+@layer components {
+  /* Buttons ------------------------------------------------------------- */
+  .btn {
+    @apply inline-flex w-full items-center justify-center gap-2.5 rounded-xl px-4 py-3.5
+           text-[0.95rem] font-medium transition
+           active:scale-[0.985] disabled:pointer-events-none disabled:opacity-45;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-[#04121f] hover:bg-[#6aabf3]
+           shadow-[0_0_0_1px_#4d9bf0,0_8px_28px_-10px_#4d9bf0cc];
+  }
+
+  .btn-ghost {
+    @apply border border-line bg-raised text-ink hover:border-line-strong hover:bg-[#1b1f27];
+  }
+
+  .btn-quiet {
+    @apply w-full py-2 text-sm text-muted transition hover:text-ink disabled:opacity-45;
+  }
+
+  /* Form fields --------------------------------------------------------- */
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-4 py-3.5 text-[0.95rem]
+           text-ink placeholder:text-faint outline-none transition
+           focus:border-accent focus:ring-4 focus:ring-[#4d9bf01f];
+  }
+
+  .field-label {
+    @apply mb-2 block font-mono text-[0.68rem] uppercase tracking-[0.14em] text-faint;
+  }
+
+  /* Surfaces ------------------------------------------------------------ */
+  .card {
+    @apply rounded-2xl border border-line bg-surface;
+  }
+
+  .eyebrow {
+    @apply font-mono text-[0.68rem] uppercase tracking-[0.16em] text-faint;
+  }
+
+  /* Amounts and hashes read as data, never as prose. */
+  .numeric {
+    @apply font-mono tabular-nums tracking-tight;
+  }
 }
