@@ -3,6 +3,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { anonymous, emailOTP } from "better-auth/plugins";
 import { importPKCS8, SignJWT } from "jose";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { sendOtpEmail } from "@/lib/email";
 
@@ -53,10 +54,24 @@ export const auth = betterAuth({
   },
   // Required for Sign In with Apple's redirect flow to be trusted.
   trustedOrigins: ["https://appleid.apple.com"],
+  advanced: {
+    backgroundTasks: {
+      // Hands the send to Next's `after()` so the response still goes out
+      // immediately (keeping the timing oracle closed) while the platform is
+      // told to keep the instance alive until Resend actually responds.
+      // Without this, Better Auth falls back to awaiting the promise inline.
+      handler: (promise) => after(promise),
+    },
+  },
   plugins: [
     emailOTP({
       async sendVerificationOTP({ email, otp, type }) {
-        void sendOtpEmail({ email, otp, type });
+        // Awaited, not voided: the promise this returns is what Better Auth
+        // hands to the background handler above. Discarding it orphaned the
+        // HTTP call to Resend, which survives locally but gets frozen on
+        // serverless the moment the response flushes — OTP mail silently
+        // never sent.
+        await sendOtpEmail({ email, otp, type });
       },
     }),
     anonymous(),

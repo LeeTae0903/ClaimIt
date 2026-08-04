@@ -9,6 +9,11 @@ import {
   NoWalletError,
 } from "@/server/services/claim-service";
 
+// The payout waits up to 15s for Circle to reach COMPLETE (compliance
+// screening can deny after acceptance). Must not be cut short by the
+// platform's default function timeout while a transfer is in flight.
+export const maxDuration = 60;
+
 function clientIp(request: NextRequest): string {
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) return forwardedFor.split(",")[0].trim();

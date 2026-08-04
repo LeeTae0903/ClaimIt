@@ -20,8 +20,10 @@ const SUBJECTS: Record<OtpType, string> = {
   "change-email": "Confirm your new claimIT email",
 };
 
-// Intentionally not awaited by callers — Better Auth recommends this so
-// response time doesn't reveal whether an account exists.
+// The caller must not block its response on this (response time would reveal
+// whether an account exists), but must not drop the promise either — see the
+// backgroundTasks handler in auth.ts, which routes it through Next's
+// `after()` so it survives past the response on serverless.
 export function sendOtpEmail({
   email,
   otp,

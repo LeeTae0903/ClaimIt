@@ -8,8 +8,12 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  // DIRECT_URL, not DATABASE_URL. The CLI needs a session-mode connection:
+  // `migrate deploy` holds a Postgres advisory lock across statements, which
+  // a transaction-mode pooler can break by swapping the backing session
+  // mid-migration. Prisma 7 removed `directUrl`, so the split lives here.
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"],
     shadowDatabaseUrl: process.env["SHADOW_DATABASE_URL"],
   },
 });

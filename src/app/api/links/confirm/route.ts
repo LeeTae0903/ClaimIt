@@ -8,6 +8,12 @@ import {
 import { DepositNotIndexedYetError } from "@/server/services/transfer-service";
 import { clearUserTokenCookie, getUserTokenCookie } from "@/lib/circle/user-token-cookie";
 
+// findDepositTransaction retries Circle up to 5 times with 1.5s gaps to ride
+// out indexing lag — roughly 6s of sleep plus the calls themselves. The
+// platform default would cut that short and turn a retryable 409 into a hard
+// error.
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) {
