@@ -129,6 +129,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// How many of the wallet's most recent transactions to inspect per attempt.
+// The one we're looking for was created seconds ago and the list comes back
+// newest-first, so anything beyond this is someone else's older activity.
+const DEPOSIT_SCAN_DEPTH = 10;
+
 /**
  * Called after the client-side challenge from createDepositChallenge
  * succeeds. Finds the resulting transaction by refId (there's no other
@@ -138,13 +143,19 @@ function sleep(ms: number) {
  * the actual on-chain amount before recording the transaction itself via
  * recordTransaction.
  *
- * There's a short, variable indexing lag between the challenge executing
- * client-side and the transaction showing up via listTransactions — Arc
- * itself has sub-second finality, but Circle's own query API isn't
- * necessarily caught up the instant the client's callback fires. Retries a
- * few times with a short delay before giving up; callers (the API route)
- * should treat DepositNotIndexedYetError as retryable and surface that to
- * the client rather than a hard failure.
+ * Matching costs a lookup per candidate because **Circle's list endpoint
+ * omits refId entirely** — it's only present on GET /transactions/{id}, and
+ * the documented `refId` query parameter is ignored (verified against the
+ * live API: filtering by three different refIds returned the same unfiltered
+ * set). Comparing `tx.refId` straight off the list therefore never matches,
+ * which previously made every deposit look like an indexing failure forever.
+ * refId is still the only safe key: two links for the same amount to the
+ * same treasury are indistinguishable by amount/address alone.
+ *
+ * A genuine indexing lag also exists — Arc has sub-second finality but
+ * Circle's query API isn't necessarily caught up the instant the client's
+ * callback fires — so this still retries, and callers (the API route) should
+ * treat DepositNotIndexedYetError as retryable.
  */
 export async function findDepositTransaction({
   userToken,
@@ -159,23 +170,53 @@ export async function findDepositTransaction({
   maxAttempts?: number;
   delayMs?: number;
 }) {
+  // Transactions already fetched and ruled out. Retries only pay for ids
+  // that appeared since the previous pass.
+  const ruledOut = new Set<string>();
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const response = await circleUserClient.listTransactions({
       userToken,
       walletIds: [fromWalletId],
     });
 
-    const transaction = (response.data?.transactions ?? []).find(
-      (tx) => tx.refId === refId,
+    const candidates = (response.data?.transactions ?? []).slice(
+      0,
+      DEPOSIT_SCAN_DEPTH,
     );
-    if (transaction) {
-      return {
-        circleTxId: transaction.id,
-        state: transaction.state,
-        amountMicros: BigInt(
-          Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
-        ),
-      };
+
+    for (const candidate of candidates) {
+      // Kept for the day Circle starts returning it in the list response:
+      // then no detail call is needed at all.
+      if (candidate.refId === refId) {
+        return {
+          circleTxId: candidate.id,
+          state: candidate.state,
+          amountMicros: BigInt(
+            Math.round(Number(candidate.amounts?.[0] ?? "0") * 1_000_000),
+          ),
+        };
+      }
+
+      if (!candidate.id || ruledOut.has(candidate.id)) continue;
+
+      const detail = await circleUserClient.getTransaction({
+        userToken,
+        id: candidate.id,
+      });
+      const transaction = detail.data?.transaction;
+
+      if (transaction?.refId === refId) {
+        return {
+          circleTxId: transaction.id ?? candidate.id,
+          state: transaction.state ?? candidate.state,
+          amountMicros: BigInt(
+            Math.round(Number(transaction.amounts?.[0] ?? "0") * 1_000_000),
+          ),
+        };
+      }
+
+      ruledOut.add(candidate.id);
     }
 
     if (attempt < maxAttempts) await sleep(delayMs);
