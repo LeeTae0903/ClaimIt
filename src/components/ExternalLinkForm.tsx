@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useState, useSyncExternalStore } from "react";
+import { FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { ClaimLinkResult } from "@/components/ClaimLinkResult";
 import {
   connectWallet,
   ensureArcChain,
+  getConnectedAccount,
   getUsdcBalanceMicros,
   hasInjectedWallet,
   sendUsdc,
@@ -68,6 +69,22 @@ export function ExternalLinkForm() {
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [claimUrl, setClaimUrl] = useState<string | null>(null);
+
+  // Pick up a wallet the user has already authorised — signing in with a
+  // wallet shouldn't be followed by pressing Connect for the same wallet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const existing = await getConnectedAccount();
+      if (cancelled || !existing) return;
+      setAccount(existing);
+      const balance = await getUsdcBalanceMicros(existing).catch(() => null);
+      if (!cancelled && balance !== null) setBalanceMicros(balance);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleConnect() {
     setError(null);

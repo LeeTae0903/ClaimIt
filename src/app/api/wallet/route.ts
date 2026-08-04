@@ -16,13 +16,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const wallets = await db.wallet.findMany({
-    where: { userId: session.user.id, role: "PERSONAL" },
-    select: { id: true, address: true, blockchain: true },
-  });
+  // Two different things, both legitimately "your wallet": one provisioned
+  // through Circle, and one the user proved they own by signing in with it.
+  // Someone who signed in with a wallet has the second and not the first, and
+  // the UI has to stop treating the absence of a Circle wallet as "no wallet".
+  const [wallets, walletAddresses] = await Promise.all([
+    db.wallet.findMany({
+      where: { userId: session.user.id, role: "PERSONAL" },
+      select: { id: true, address: true, blockchain: true },
+    }),
+    db.walletAddress.findMany({
+      where: { userId: session.user.id },
+      select: { address: true, chainId: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   return NextResponse.json({
     wallets,
+    walletAddresses,
     user: {
       isAnonymous: session.user.isAnonymous ?? false,
       email: session.user.isAnonymous ? null : session.user.email,

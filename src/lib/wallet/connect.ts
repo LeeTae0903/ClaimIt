@@ -43,6 +43,26 @@ export function hasInjectedWallet(): boolean {
   );
 }
 
+/**
+ * The already-authorised account, or null.
+ *
+ * `eth_accounts` never prompts — it only reports what the user has previously
+ * granted. That's what makes it safe to call on mount: someone who signed in
+ * with their wallet shouldn't have to press Connect again just to see their
+ * own balance.
+ */
+export async function getConnectedAccount(): Promise<string | null> {
+  if (!hasInjectedWallet()) return null;
+  try {
+    const accounts = (await provider().request({
+      method: "eth_accounts",
+    })) as string[];
+    return accounts?.length ? getAddress(accounts[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function connectWallet(): Promise<string> {
   try {
     const accounts = (await provider().request({

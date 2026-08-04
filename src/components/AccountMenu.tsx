@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
+import { getUsdcBalanceMicros } from "@/lib/wallet/connect";
 
 type WalletInfo = { id: string; address: string; blockchain: string };
 type AccountInfo = {
   wallets: WalletInfo[];
+  walletAddresses: { address: string; chainId: number }[];
   user: { isAnonymous: boolean; email: string | null };
 };
 
@@ -21,13 +23,28 @@ export function AccountMenu() {
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [balanceMicros, setBalanceMicros] = useState<bigint | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/wallet")
-      .then((res) => (res.ok ? res.json() : null))
-      .then(setInfo)
-      .catch(() => setInfo(null));
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/wallet").catch(() => null);
+      const data: AccountInfo | null = res?.ok ? await res.json() : null;
+      if (cancelled) return;
+      setInfo(data);
+
+      // Read straight from Arc rather than storing a balance we'd have to keep
+      // fresh. Failing quietly: a missing balance is worth less than a broken
+      // account menu.
+      const address = data?.wallets[0]?.address ?? data?.walletAddresses[0]?.address;
+      if (!address) return;
+      const balance = await getUsdcBalanceMicros(address).catch(() => null);
+      if (!cancelled && balance !== null) setBalanceMicros(balance);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Close on outside click or Escape, so the panel never traps the page.
@@ -63,8 +80,20 @@ export function AccountMenu() {
 
   if (!info) return null;
 
-  const wallet = info.wallets[0];
-  const label = info.user.isAnonymous ? "Guest" : (info.user.email ?? "Account");
+  // A Circle-provisioned wallet if there is one, otherwise the address the
+  // user signed in with. Both are "your wallet" from here.
+  const circleWallet = info.wallets[0];
+  const siweAddress = info.walletAddresses[0]?.address;
+  const walletAddress = circleWallet?.address ?? siweAddress;
+  const walletKind = circleWallet ? "Built-in wallet" : "Connected wallet";
+  // A wallet sign-in gets a synthetic email (0x…@domain) so Better Auth has a
+  // unique identifier; showing that to the user would be nonsense. The address
+  // is what they recognise.
+  const label = siweAddress
+    ? shorten(siweAddress)
+    : info.user.isAnonymous
+      ? "Guest"
+      : (info.user.email ?? "Account");
 
   return (
     <div ref={rootRef} className="relative">
@@ -96,22 +125,32 @@ export function AccountMenu() {
           </div>
 
           <div className="border-b border-line px-4 py-3">
-            <span className="eyebrow">Wallet</span>
-            {wallet ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="eyebrow">{walletAddress ? walletKind : "Wallet"}</span>
+              {walletAddress && (
+                <span className="numeric text-sm">
+                  {balanceMicros === null
+                    ? "…"
+                    : (Number(balanceMicros) / 1e6).toFixed(2)}{" "}
+                  <span className="text-xs text-faint">USDC</span>
+                </span>
+              )}
+            </div>
+            {walletAddress ? (
               <>
                 <p className="mt-1.5 font-mono text-xs leading-relaxed break-all text-muted">
-                  {wallet.address}
+                  {walletAddress}
                 </p>
                 <div className="mt-2.5 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => copyAddress(wallet.address)}
+                    onClick={() => copyAddress(walletAddress)}
                     className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-line-strong hover:text-ink"
                   >
-                    {copied ? "Copied" : `Copy ${shorten(wallet.address)}`}
+                    {copied ? "Copied" : `Copy ${shorten(walletAddress)}`}
                   </button>
                   <a
-                    href={`https://testnet.arcscan.app/address/${wallet.address}`}
+                    href={`https://testnet.arcscan.app/address/${walletAddress}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs text-accent transition hover:underline"

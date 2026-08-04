@@ -51,9 +51,13 @@ function Segmented<T extends string>({
   );
 }
 
-export function CreateModeSwitch() {
+export function CreateModeSwitch({
+  defaultSource = "builtin",
+}: {
+  defaultSource?: Source;
+}) {
   const [mode, setMode] = useState<Mode>("single");
-  const [source, setSource] = useState<Source>("builtin");
+  const [source, setSource] = useState<Source>(defaultSource);
 
   return (
     <div className="space-y-6">
