@@ -1,0 +1,22 @@
+-- Shut the door at the schema, not just at each table.
+--
+-- The previous migration revoked table privileges and the default privileges
+-- that would re-grant them. That covers tables Prisma creates, because Prisma
+-- creates them as `postgres` and only the `postgres` default ACL applies.
+--
+-- But pg_default_acl still carries entries for schema `public` granted by
+-- `supabase_admin` handing anon and authenticated full DML, and those cannot
+-- be removed from here: ALTER DEFAULT PRIVILEGES only touches the grantor you
+-- are (or are a member of). So anything ever created in `public` by that role
+-- would be world-writable again, and nothing in the app would notice.
+--
+-- Revoking USAGE on the schema settles it independently of table grants: with
+-- no USAGE, a role cannot reach any object inside, whatever privileges it
+-- holds on that object and whoever created it. PostgREST is then locked out of
+-- `public` permanently rather than one table at a time.
+--
+-- Safe here because nothing legitimate depends on it: the app connects as
+-- `postgres`, and Supabase's own auth/storage/realtime objects live in their
+-- own schemas, which are untouched.
+REVOKE USAGE ON SCHEMA public FROM anon, authenticated;
+REVOKE CREATE ON SCHEMA public FROM anon, authenticated;
