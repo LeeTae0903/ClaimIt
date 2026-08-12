@@ -1,9 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { isAddress } from "viem";
 import { useSession } from "@/lib/auth-client";
+import {
+  connectWallet,
+  ensureArcChain,
+  getConnectedAccount,
+  hasInjectedWallet,
+} from "@/lib/wallet/connect";
 
 type PublicLinkInfo =
   | { found: false }
@@ -18,20 +23,45 @@ function formatUsdc(amountMicros: string): string {
   return (Number(amountMicros) / 1_000_000).toFixed(2);
 }
 
+function shorten(address: string) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/** Where a claim is heading, and how we came to know it. */
+type Destination = {
+  address: string;
+  kind: "signed-in" | "built-in" | "connected";
+};
+
+const DESTINATION_LABEL: Record<Destination["kind"], string> = {
+  "signed-in": "the wallet you signed in with",
+  "built-in": "your built-in wallet",
+  connected: "your connected wallet",
+};
+
 export function ClaimPageClient({ token }: { token: string }) {
   const router = useRouter();
   const { data: session, isPending: sessionPending } = useSession();
 
   const [info, setInfo] = useState<PublicLinkInfo | null>(null);
-  const [address, setAddress] = useState("");
-  const [prefilled, setPrefilled] = useState<"signed-in" | "built-in" | null>(
-    null,
-  );
+  // A wallet we already know about: signed in with, provisioned here, or
+  // already authorised in this browser. With one of these the claim is a
+  // single press; without one, connecting is the press.
+  const [known, setKnown] = useState<Destination | null>(null);
   const [password, setPassword] = useState("");
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ amountMicros: string; txHash: string | null } | null>(
-    null,
+  const [addedChain, setAddedChain] = useState(false);
+  const [result, setResult] = useState<{
+    amountMicros: string;
+    txHash: string | null;
+    toAddress: string;
+  } | null>(null);
+
+  const walletAvailable = useSyncExternalStore(
+    () => () => {},
+    () => hasInjectedWallet(),
+    () => true,
   );
 
   useEffect(() => {
@@ -41,53 +71,95 @@ export function ClaimPageClient({ token }: { token: string }) {
       .catch(() => setInfo({ found: false }));
   }, [token]);
 
-  // Offer the visitor's own wallet rather than making them go and copy their
-  // address. The one they signed in with wins: it's the wallet they hold keys
-  // to, and paying into a leftover built-in wallet they never open is worse
-  // than not prefilling at all — the transfer can't be undone.
+  // Find a wallet without asking. The account's own wallets come from the
+  // session; a browser extension already authorised for this site answers
+  // eth_accounts without prompting. Only if both come up empty does the
+  // visitor have to do anything at all.
   useEffect(() => {
-    fetch("/api/wallet")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const signedInWith = data?.walletAddresses?.[0]?.address;
-        const own = signedInWith ?? data?.wallets?.[0]?.address;
-        if (own) {
-          setAddress(own);
-          setPrefilled(signedInWith ? "signed-in" : "built-in");
-        }
-      })
-      .catch(() => {});
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/wallet").catch(() => null);
+      const data = res?.ok ? await res.json() : null;
+      if (cancelled) return;
+
+      const signedInWith = data?.walletAddresses?.[0]?.address;
+      if (signedInWith) {
+        setKnown({ address: signedInWith, kind: "signed-in" });
+        return;
+      }
+      const builtIn = data?.wallets?.[0]?.address;
+      if (builtIn) {
+        setKnown({ address: builtIn, kind: "built-in" });
+        return;
+      }
+      const already = await getConnectedAccount();
+      if (!cancelled && already) {
+        setKnown({ address: already, kind: "connected" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function handleClaim(e: FormEvent) {
+  async function claimTo(toAddress: string) {
+    const res = await fetch(`/api/links/${token}/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toAddress, password: password || undefined }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data.code === "NO_WALLET") {
+        router.push(`/wallet/setup?redirect=/claim/${token}`);
+        return;
+      }
+      throw new Error(data.error ?? "Couldn't claim this link.");
+    }
+    setResult({
+      amountMicros: data.amountMicros,
+      txHash: data.txHash,
+      toAddress: data.toAddress ?? toAddress,
+    });
+  }
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!destination) return;
     setError(null);
     setClaiming(true);
-
     try {
-      const res = await fetch(`/api/links/${token}/claim`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toAddress: address.trim() || undefined,
-          password: password || undefined,
-        }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.code === "NO_WALLET") {
-          router.push(`/wallet/setup?redirect=/claim/${token}`);
-          return;
-        }
-        throw new Error(data.error ?? "Couldn't claim this link.");
-      }
-
-      setResult({ amountMicros: data.amountMicros, txHash: data.txHash });
+      await claimTo(destination.address);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setClaiming(false);
+    }
+  }
+
+  /** Connect and claim in one press — the wallet prompt is the only step. */
+  async function handleConnectAndClaim(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setClaiming(true);
+    try {
+      const address = await connectWallet();
+      setKnown({ address, kind: "connected" });
+      await claimTo(address);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't connect.");
+    } finally {
+      setClaiming(false);
+    }
+  }
+
+  async function addArcToWallet() {
+    try {
+      await ensureArcChain();
+      setAddedChain(true);
+    } catch {
+      /* Declining is fine — the USDC has already arrived either way. */
     }
   }
 
@@ -112,13 +184,30 @@ export function ClaimPageClient({ token }: { token: string }) {
             <span className="ml-2 text-lg font-normal text-muted">USDC</span>
           </p>
           <p className="mt-3 text-sm text-muted">
-            It&apos;s in your wallet now. Open the account menu above to see
-            the address.
+            Sent to{" "}
+            <span className="font-mono text-ink">
+              {shorten(result.toAddress)}
+            </span>
+            .
           </p>
+          {walletAvailable && !addedChain && (
+            <button
+              type="button"
+              onClick={addArcToWallet}
+              className="btn btn-ghost mt-7"
+            >
+              Add Arc Testnet to see it in your wallet
+            </button>
+          )}
+          {addedChain && (
+            <p className="mt-7 text-xs text-faint">
+              Arc Testnet added — the USDC shows up under that network.
+            </p>
+          )}
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
-            className="btn btn-ghost mt-7"
+            className="btn btn-ghost mt-3"
           >
             View my activity
           </button>
@@ -137,11 +226,11 @@ export function ClaimPageClient({ token }: { token: string }) {
     );
   }
 
-  const trimmedAddress = address.trim();
-  const addressValid = isAddress(trimmedAddress);
-  // Only complain once they've typed something long enough to be a real
-  // attempt — flagging "invalid" at the first character is just noise.
-  const showAddressError = trimmedAddress.length >= 10 && !addressValid;
+  // A claim always goes to a wallet the visitor controls right now — one on
+  // their account, or one they connect here. Pasting an address was removed
+  // deliberately: it is the only way to send an irreversible payout to a
+  // typo, and every recipient who has a wallet can just connect it.
+  const destination = known;
 
   if (!info || sessionPending) return <ClaimSkeleton />;
 
@@ -195,36 +284,26 @@ export function ClaimPageClient({ token }: { token: string }) {
           <span className="ml-2 text-xl font-normal text-muted">USDC</span>
         </p>
 
-        <form onSubmit={handleClaim} className="mt-8 space-y-4">
-          <div className="text-left">
-            <label className="field-label">Send it to</label>
-            <input
-              type="text"
-              required
-              spellCheck={false}
-              autoComplete="off"
-              value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                setPrefilled(null);
-              }}
-              placeholder="0x… your wallet address on Arc"
-              className="field font-mono text-sm"
-            />
-            <p
-              className={`mt-2 text-xs leading-relaxed ${
-                showAddressError ? "text-bad" : "text-faint"
-              }`}
-            >
-              {showAddressError
-                ? "That isn't a valid address. Check every character — a payout can't be undone."
-                : prefilled === "signed-in"
-                  ? "The wallet you signed in with. Change it if you want the money elsewhere."
-                  : prefilled === "built-in"
-                    ? "Your built-in wallet. Change it if you want the money elsewhere."
-                    : "Double-check it. The transfer is final and goes wherever this points."}
+        <form
+          onSubmit={destination ? handleSubmit : handleConnectAndClaim}
+          className="mt-8 space-y-4"
+        >
+          {destination ? (
+            <div className="rounded-xl border border-line bg-surface px-4 py-3 text-left">
+              <span className="eyebrow">Goes to</span>
+              <p className="mt-1.5 font-mono text-sm text-ink">
+                {shorten(destination.address)}
+              </p>
+              <p className="mt-1 text-xs text-faint">
+                {DESTINATION_LABEL[destination.kind]}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm leading-relaxed text-muted">
+              Connect your wallet and the USDC goes straight into it. Nothing to
+              copy, nothing to type.
             </p>
-          </div>
+          )}
 
           {info.hasPassword && (
             <div className="text-left">
@@ -248,11 +327,24 @@ export function ClaimPageClient({ token }: { token: string }) {
 
           <button
             type="submit"
-            disabled={claiming || !addressValid}
+            disabled={claiming || (!destination && !walletAvailable)}
             className="btn btn-primary"
           >
-            {claiming ? "Claiming…" : `Claim ${formatUsdc(info.amountMicros)} USDC`}
+            {claiming
+              ? destination
+                ? "Claiming…"
+                : "Check your wallet…"
+              : destination
+                ? `Claim ${formatUsdc(info.amountMicros)} USDC`
+                : "Connect wallet & claim"}
           </button>
+
+          {!destination && !walletAvailable && (
+            <p className="rounded-xl border border-line bg-surface px-4 py-3 text-xs leading-relaxed text-faint">
+              No wallet extension found in this browser. Install MetaMask, Rabby
+              or OKX Wallet — or have one created for you below.
+            </p>
+          )}
 
           {!session && (
             <button
