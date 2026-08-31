@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
+import {
+  Wallet,
+  ShieldCheck,
+  KeyRound,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Sparkles,
+} from "lucide-react";
 
 type WalletInfo = { id: string; address: string; blockchain: string };
 
@@ -26,12 +35,6 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
     | { phase: "error"; message: string }
   >({ phase: "loading" });
 
-  // Guards against React Strict Mode's dev-only double-invocation of
-  // effects: without this, POST /api/wallet/ensure fires twice in quick
-  // succession, and the second call loses a genuine race against Circle's
-  // API (both read circleUserId as not-yet-set and try to create the same
-  // user). Refs persist across Strict Mode's mount/cleanup/remount cycle
-  // for the same component instance, so this reliably runs ensure() once.
   const hasStartedRef = useRef(false);
 
   useEffect(() => {
@@ -109,31 +112,59 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
   }
 
   if (state.phase === "loading") {
-    return <p className="text-sm text-black/60 dark:text-white/60">Setting up your wallet…</p>;
+    return (
+      <div className="rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 text-center space-y-3 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+          <Sparkles className="h-5 w-5 animate-pulse" />
+        </div>
+        <p className="text-sm font-medium text-zinc-300">Initializing Circle Wallet Provisioning...</p>
+      </div>
+    );
   }
 
   if (state.phase === "error") {
-    return <p className="text-sm text-red-600 dark:text-red-400">{state.message}</p>;
+    return (
+      <div className="rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 space-y-4 shadow-2xl backdrop-blur-xl">
+        <div className="flex items-center gap-2 text-xs text-red-400">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <span>{state.message}</span>
+        </div>
+      </div>
+    );
   }
 
   if (state.phase === "ready") {
     return (
-      <div className="space-y-4">
+      <div className="rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 space-y-6 shadow-2xl backdrop-blur-xl text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <CheckCircle2 className="h-6 w-6" />
+        </div>
         <div className="space-y-2">
-          <p className="text-sm font-medium">Wallet ready</p>
+          <h2 className="text-xl font-bold text-white">Wallet Ready!</h2>
+          <p className="text-xs text-zinc-400">
+            Your Circle User-Controlled Wallet has been securely provisioned.
+          </p>
+        </div>
+
+        <div className="space-y-2">
           {state.wallets.map((w) => (
-            <p key={w.id} className="font-mono text-xs text-black/60 dark:text-white/60">
-              {w.blockchain}: {w.address}
-            </p>
+            <div key={w.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-left space-y-1">
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-blue-400">{w.blockchain}</span>
+              <p className="font-mono text-xs text-zinc-300 break-all select-all">
+                {w.address}
+              </p>
+            </div>
           ))}
         </div>
+
         {redirectTo && (
           <button
             type="button"
             onClick={() => router.push(redirectTo)}
-            className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] dark:bg-white dark:text-black"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98]"
           >
-            Continue
+            <span>Continue to Destination</span>
+            <ArrowRight className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -141,13 +172,27 @@ export function WalletSetup({ redirectTo }: { redirectTo?: string }) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={setUpPin}
-      disabled={state.phase === "setting-up"}
-      className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
-    >
-      {state.phase === "setting-up" ? "Setting up…" : "Set up your wallet"}
-    </button>
+    <div className="rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 space-y-6 shadow-2xl backdrop-blur-xl text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+        <KeyRound className="h-6 w-6" />
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-xl font-bold text-white">Set Up Security PIN</h2>
+        <p className="text-xs text-zinc-400">
+          Circle hosted security setup is required to initialize your non-custodial wallet PIN.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={setUpPin}
+        disabled={state.phase === "setting-up"}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98] disabled:opacity-50"
+      >
+        <ShieldCheck className="h-4 w-4" />
+        <span>{state.phase === "setting-up" ? "Opening Circle Hosted PIN UI…" : "Set Up Security PIN"}</span>
+      </button>
+    </div>
   );
 }

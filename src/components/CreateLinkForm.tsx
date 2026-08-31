@@ -4,6 +4,16 @@ import { FormEvent, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
+import {
+  Lock,
+  Clock,
+  Copy,
+  Check,
+  AlertCircle,
+  Share2,
+  ShieldCheck,
+  Gift,
+} from "lucide-react";
 
 type PrepareResponse = {
   linkId: string;
@@ -18,10 +28,6 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// The server already retries internally, but Circle's indexing lag can
-// occasionally outlast that too — retry here as well before giving up. If
-// even this gives up, the PaymentLink stays PENDING_DEPOSIT rather than
-// missing entirely, and the reconciliation job picks it up automatically.
 async function confirmDepositWithRetry(
   linkId: string,
   maxAttempts = 3,
@@ -44,14 +50,17 @@ async function confirmDepositWithRetry(
   }
 }
 
-export function CreateLinkForm() {
+export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
   const router = useRouter();
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState("10");
   const [password, setPassword] = useState("");
   const [expiresInHours, setExpiresInHours] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimUrl, setClaimUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const presets = ["5", "10", "25", "50", "100"];
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -72,10 +81,10 @@ export function CreateLinkForm() {
 
       if (!prepareRes.ok) {
         if (prepareData.code === "NO_WALLET") {
-          router.push("/wallet/setup?redirect=/links/new");
+          router.push("/wallet/setup?redirect=/dashboard");
           return;
         }
-        throw new Error(prepareData.error ?? "Couldn't start this link.");
+        throw new Error(prepareData.error ?? "Couldn't create Loot link.");
       }
 
       const { linkId, challengeId, userToken, encryptionKey, claimToken, circleAppId } =
@@ -95,6 +104,7 @@ export function CreateLinkForm() {
       await confirmDepositWithRetry(linkId);
 
       setClaimUrl(`${window.location.origin}/claim/${claimToken}`);
+      onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -102,84 +112,206 @@ export function CreateLinkForm() {
     }
   }
 
+  function handleCopy() {
+    if (!claimUrl) return;
+    navigator.clipboard.writeText(claimUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   if (claimUrl) {
     return (
       <div className="space-y-6 text-center">
-        <p className="text-sm font-medium text-black/70 dark:text-white/70">
-          Your link is ready
-        </p>
-        <div className="flex justify-center rounded-2xl bg-white p-6">
-          <QRCodeSVG value={claimUrl} size={200} />
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <Check className="h-6 w-6" />
         </div>
-        <div className="break-all rounded-xl border border-black/10 px-4 py-3 font-mono text-xs dark:border-white/15">
-          {claimUrl}
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-white">Loot Link Ready!</h2>
+          <p className="text-xs text-zinc-400">
+            Share this URL or QR code with your recipient.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => navigator.clipboard.writeText(claimUrl)}
-          className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] dark:bg-white dark:text-black"
-        >
-          Copy link
-        </button>
+
+        {/* QR Code Card */}
+        <div className="mx-auto flex justify-center rounded-2xl bg-white p-6 shadow-inner w-max">
+          <QRCodeSVG value={claimUrl} size={180} />
+        </div>
+
+        {/* URL Box */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3.5 flex items-center justify-between gap-3">
+          <span className="truncate font-mono text-xs text-zinc-300 select-all">
+            {claimUrl}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-700 transition-colors flex-shrink-0"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="text-emerald-400">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3.5 w-3.5" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98]"
+          >
+            <Share2 className="h-4 w-4" />
+            <span>Share Link</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setClaimUrl(null);
+              setAmount("10");
+              setPassword("");
+              setExpiresInHours("");
+            }}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+          >
+            <span>Create Another</span>
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Amount (USDC)
+    <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Amount Input */}
+      <div className="space-y-2">
+        <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          Loot Amount (USDC)
         </label>
-        <input
-          type="number"
-          min="0.1"
-          step="0.01"
-          required
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="50.00"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-        />
+        <div className="relative">
+          <div className="absolute left-4 top-3.5 text-lg font-bold text-blue-400">
+            $
+          </div>
+          <input
+            type="number"
+            min="0.1"
+            step="0.01"
+            required
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="10.00"
+            className="w-full rounded-2xl border border-zinc-800 bg-zinc-950/80 pl-9 pr-16 py-3.5 text-xl font-bold text-white outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          />
+          <div className="absolute right-4 top-4 text-xs font-semibold text-zinc-400">
+            USDC
+          </div>
+        </div>
+
+        {/* Quick Amount Presets */}
+        <div className="flex gap-2 pt-1">
+          {presets.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setAmount(preset)}
+              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition ${
+                amount === preset
+                  ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                  : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              }`}
+            >
+              ${preset}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Password (optional)
+      {/* Password Protection */}
+      <div className="space-y-2">
+        <label className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          <span className="flex items-center gap-1.5">
+            <Lock className="h-3.5 w-3.5 text-zinc-500" />
+            Password Protection
+          </span>
+          <span className="text-[10px] text-zinc-500 font-normal">Optional</span>
         </label>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Leave blank for none"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
+          placeholder="Set password to unlock Loot"
+          className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600"
         />
       </div>
 
-      <div>
-        <label className="mb-1.5 block text-sm text-black/60 dark:text-white/60">
-          Expires in (hours, optional)
+      {/* Expiration Options */}
+      <div className="space-y-2">
+        <label className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-zinc-400">
+          <span className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-zinc-500" />
+            Link Expiration
+          </span>
+          <span className="text-[10px] text-zinc-500 font-normal">Optional</span>
         </label>
-        <input
-          type="number"
-          min="1"
-          value={expiresInHours}
-          onChange={(e) => setExpiresInHours(e.target.value)}
-          placeholder="Never"
-          className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-        />
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "1 Hour", value: "1" },
+            { label: "24 Hours", value: "24" },
+            { label: "7 Days", value: "168" },
+            { label: "Never", value: "" },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => setExpiresInHours(item.value)}
+              className={`rounded-lg border py-2 text-xs font-medium transition ${
+                expiresInHours === item.value
+                  ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                  : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary Box */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 space-y-2 text-xs">
+        <div className="flex justify-between text-zinc-400">
+          <span>Deposit Amount:</span>
+          <span className="font-semibold text-white">{amount || "0"} USDC</span>
+        </div>
+        <div className="flex justify-between text-zinc-400">
+          <span>Recipient Network Fee:</span>
+          <span className="text-emerald-400 font-semibold">Free ($0.00)</span>
+        </div>
+        <div className="flex justify-between border-t border-zinc-800/80 pt-2 text-zinc-300 font-semibold">
+          <span>Recipient Claim Amount:</span>
+          <span className="text-blue-400 font-bold text-sm">{amount || "0"} USDC</span>
+        </div>
       </div>
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
       )}
 
       <button
         type="submit"
-        disabled={loading}
-        className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
+        disabled={loading || !amount || Number(amount) <= 0}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 shadow-md"
       >
-        {loading ? "Creating…" : "Create claim link"}
+        <ShieldCheck className="h-4 w-4" />
+        <span>{loading ? "Authorizing Escrow Deposit…" : `Deposit & Generate Loot Link`}</span>
       </button>
     </form>
   );

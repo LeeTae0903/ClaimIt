@@ -5,7 +5,7 @@ import { Resend } from "resend";
 // so that failure happens at send-time (a real API error) instead.
 const resend = new Resend(process.env.RESEND_API_KEY || "re_not_configured");
 
-const FROM = process.env.EMAIL_FROM ?? "claimIT <onboarding@resend.dev>";
+const FROM = process.env.EMAIL_FROM ?? "LootClaim <onboarding@resend.dev>";
 
 type OtpType =
   | "sign-in"
@@ -14,10 +14,10 @@ type OtpType =
   | "change-email";
 
 const SUBJECTS: Record<OtpType, string> = {
-  "sign-in": "Your claimIT sign-in code",
-  "email-verification": "Verify your claimIT email",
-  "forget-password": "Reset your claimIT password",
-  "change-email": "Confirm your new claimIT email",
+  "sign-in": "Your LootClaim sign-in code",
+  "email-verification": "Verify your LootClaim email",
+  "forget-password": "Reset your LootClaim password",
+  "change-email": "Confirm your new LootClaim email",
 };
 
 // Intentionally not awaited by callers — Better Auth recommends this so
