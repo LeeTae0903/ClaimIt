@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { WalletSetup } from "@/components/WalletSetup";
+import { Gift } from "lucide-react";
 
 export default async function WalletSetupPage({
   searchParams,
@@ -14,16 +16,25 @@ export default async function WalletSetupPage({
   const { redirect: redirectTo } = await searchParams;
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-12">
-      <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Your wallet</h1>
-          <p className="text-sm text-black/60 dark:text-white/60">
-            Used to send and receive USDC on Arc Testnet.
-          </p>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col selection:bg-blue-600/30 selection:text-blue-200">
+      {/* Header */}
+      <header className="border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+          <Link href="/" className="flex items-center gap-2">
+            <Gift className="h-5 w-5 text-blue-400" />
+            <span className="text-base font-bold text-white tracking-tight">
+              Loot<span className="text-blue-400">Claim</span>
+            </span>
+          </Link>
         </div>
-        <WalletSetup redirectTo={redirectTo} />
-      </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="flex-1 flex flex-col justify-center px-6 py-12">
+        <div className="mx-auto w-full max-w-md">
+          <WalletSetup redirectTo={redirectTo} />
+        </div>
+      </main>
     </div>
   );
 }

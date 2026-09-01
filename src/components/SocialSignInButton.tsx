@@ -1,5 +1,3 @@
-"use client";
-
 import { ReactNode } from "react";
 
 export function SocialSignInButton({
@@ -9,7 +7,7 @@ export function SocialSignInButton({
   label,
 }: {
   onClick: () => void;
-  disabled?: boolean;
+  disabled: boolean;
   icon: ReactNode;
   label: string;
 }) {
@@ -18,10 +16,10 @@ export function SocialSignInButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center justify-center gap-3 rounded-xl border border-black/10 bg-white px-4 py-3.5 text-base font-medium text-black transition active:scale-[0.98] disabled:opacity-50 dark:border-white/15 dark:bg-white/5 dark:text-white"
+      className="flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800 hover:border-zinc-700 hover:text-white active:scale-[0.99] disabled:opacity-50"
     >
       {icon}
-      {label}
+      <span>{label}</span>
     </button>
   );
 }

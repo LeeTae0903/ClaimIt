@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#09090B"/>
+  <rect x="1" y="1" width="30" height="30" rx="7" stroke="#27272A" stroke-width="1"/>
+  
+  <!-- Gift Box Icon with Blue Accent -->
+  <path d="M22 13V22C22 23.1046 21.1046 24 20 24H12C10.8954 24 10 23.1046 10 22V13" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 10C8 9.44772 8.44772 9 9 9H23C23.5523 9 24 9.44772 24 10V13H8V10Z" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 9V24" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
+  <path d="M12.5 9C12.5 7.5 13.5 6 16 6C18.5 6 19.5 7.5 19.5 9" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

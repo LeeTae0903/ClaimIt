@@ -1,20 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: "--font-inter",
 });
 
 export const metadata: Metadata = {
-  title: "claimIT",
-  description: "Secure USDC payment links — deposit, share, claim.",
+  title: "LootClaim — Instant USDC Payment Links",
+  description: "Deposit USDC into escrow and share a claim link. Anyone can claim USDC instantly — no pre-existing wallet required.",
 };
 
 export default function RootLayout({
@@ -23,11 +18,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${inter.variable} dark h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100 font-sans selection:bg-blue-600/30 selection:text-blue-200">
+        {children}
+      </body>
     </html>
   );
 }

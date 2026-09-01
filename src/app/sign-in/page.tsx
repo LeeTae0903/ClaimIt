@@ -2,8 +2,18 @@
 
 import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
 import { SocialSignInButton } from "@/components/SocialSignInButton";
+import {
+  Gift,
+  Mail,
+  ArrowRight,
+  Sparkles,
+  AlertCircle,
+  KeyRound,
+  ArrowLeft,
+} from "lucide-react";
 
 function GoogleIcon() {
   return (
@@ -30,11 +40,7 @@ function GoogleIcon() {
 
 function AppleIcon() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5 fill-black dark:fill-white"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 24 24" className="h-5 w-5 fill-zinc-100" aria-hidden="true">
       <path d="M16.36 1.4c0 1.14-.42 2.2-1.24 3.06-.85.9-2.13 1.6-3.24 1.5-.13-1.1.44-2.24 1.22-3.02.83-.86 2.28-1.5 3.26-1.54zM20.5 17.1c-.5 1.15-1.1 2.24-2 3.24-.9 1-1.79 1.99-3.2 2.01-1.36.03-1.8-.83-3.36-.83-1.55 0-2.05.8-3.34.86-1.36.05-2.4-1.08-3.31-2.08-1.85-2.05-3.28-5.79-1.37-8.32.94-1.26 2.6-2.06 4.4-2.09 1.32-.02 2.57.9 3.37.9.8 0 2.32-1.11 3.9-.95.66.03 2.53.27 3.73 2.02-.1.06-2.22 1.3-2.2 3.87.03 3.07 2.7 4.1 2.73 4.11-.02.06-.42 1.46-1.35 2.26z" />
     </svg>
   );
@@ -43,7 +49,7 @@ function AppleIcon() {
 function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") || "/";
+  const redirectTo = searchParams.get("redirect") || "/dashboard";
 
   const [step, setStep] = useState<"email" | "otp">("email");
   const [email, setEmail] = useState("");
@@ -115,15 +121,24 @@ function SignInForm() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-12">
-      <div className="mx-auto w-full max-w-sm space-y-8">
-        <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">claimIT</h1>
-          <p className="text-sm text-black/60 dark:text-white/60">
-            Sign in to send or claim USDC.
+    <div className="flex min-h-screen flex-col justify-center bg-zinc-950 px-6 py-12 text-zinc-100">
+      <div className="mx-auto w-full max-w-sm space-y-8 rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 shadow-2xl backdrop-blur-xl">
+        {/* Brand Header */}
+        <div className="flex flex-col items-center text-center space-y-3">
+          <Link href="/" className="inline-flex items-center gap-2 text-zinc-400 hover:text-white transition-colors mb-2">
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back to Home</span>
+          </Link>
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
+            <Gift className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Sign in to LootClaim</h1>
+          <p className="text-xs text-zinc-400">
+            Send, escrow, and claim USDC Loot instantly on Arc.
           </p>
         </div>
 
+        {/* Social Sign-in Options */}
         <div className="space-y-3">
           <SocialSignInButton
             onClick={withGoogle}
@@ -139,35 +154,40 @@ function SignInForm() {
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-black/40 dark:text-white/40">
-          <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
-          or
-          <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
+        <div className="flex items-center gap-3 text-xs uppercase tracking-wider text-zinc-600">
+          <div className="h-px flex-1 bg-zinc-800" />
+          <span>or email</span>
+          <div className="h-px flex-1 bg-zinc-800" />
         </div>
 
         {step === "email" ? (
           <form onSubmit={sendCode} className="space-y-3">
-            <input
-              type="email"
-              required
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-base outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
-            />
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-3.5 h-5 w-5 text-zinc-500" />
+              <input
+                type="email"
+                required
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 pl-11 pr-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600"
+              />
+            </div>
             <button
               type="submit"
               disabled={loading !== null}
-              className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 shadow-md"
             >
-              {loading === "send-otp" ? "Sending code…" : "Continue with email"}
+              <span>{loading === "send-otp" ? "Sending OTP Code…" : "Continue with Email OTP"}</span>
+              <ArrowRight className="h-4 w-4" />
             </button>
           </form>
         ) : (
           <form onSubmit={verifyCode} className="space-y-3">
-            <p className="text-sm text-black/60 dark:text-white/60">
-              Enter the code sent to <span className="font-medium">{email}</span>
-            </p>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400 flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-blue-400 flex-shrink-0" />
+              <span>Code sent to <strong className="text-zinc-200 font-semibold">{email}</strong></span>
+            </div>
             <input
               type="text"
               inputMode="numeric"
@@ -176,39 +196,44 @@ function SignInForm() {
               placeholder="123456"
               value={otp}
               onChange={(e) => setOtp(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3.5 text-center text-lg tracking-[0.3em] outline-none focus:border-black/30 dark:border-white/15 dark:focus:border-white/40"
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3.5 text-center text-xl font-mono tracking-[0.3em] text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
             <button
               type="submit"
               disabled={loading !== null}
-              className="w-full rounded-xl bg-black px-4 py-3.5 text-base font-medium text-white transition active:scale-[0.98] disabled:opacity-50 dark:bg-white dark:text-black"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 shadow-md"
             >
-              {loading === "verify-otp" ? "Verifying…" : "Verify code"}
+              <span>{loading === "verify-otp" ? "Verifying Code…" : "Verify & Sign In"}</span>
             </button>
             <button
               type="button"
               onClick={() => setStep("email")}
-              className="w-full text-center text-sm text-black/50 dark:text-white/50"
+              className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
-              Use a different email
+              Use a different email address
             </button>
           </form>
         )}
 
         {error && (
-          <p className="text-center text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
+          <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
         )}
 
-        <button
-          type="button"
-          onClick={asGuest}
-          disabled={loading !== null}
-          className="w-full text-center text-sm text-black/50 underline-offset-4 hover:underline disabled:opacity-50 dark:text-white/50"
-        >
-          {loading === "guest" ? "Continuing…" : "Continue as guest"}
-        </button>
+        {/* Guest Access Divider */}
+        <div className="pt-2 border-t border-zinc-800/80">
+          <button
+            type="button"
+            onClick={asGuest}
+            disabled={loading !== null}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 hover:text-white active:scale-[0.98] disabled:opacity-50"
+          >
+            <Sparkles className="h-4 w-4 text-blue-400" />
+            <span>{loading === "guest" ? "Creating Guest Session…" : "Instant Access as Guest"}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -216,7 +241,11 @@ function SignInForm() {
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400 text-sm">
+        Loading sign-in...
+      </div>
+    }>
       <SignInForm />
     </Suspense>
   );
