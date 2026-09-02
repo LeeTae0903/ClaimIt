@@ -191,12 +191,6 @@ export async function reconcilePendingDeposits({
 
   for (const link of pending) {
     try {
-       {
-        results.push({ linkId: link.id, promoted: false, error: "missing refId" });
-        continue;
-      }
-  for (const link of pending) {
-    try {
       const senderWallet = await db.wallet.findFirst({
         where: { userId: link.senderId, role: "PERSONAL" },
       });
