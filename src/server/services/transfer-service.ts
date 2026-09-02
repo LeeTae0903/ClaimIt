@@ -131,12 +131,16 @@ function sleep(ms: number) {
 
 /**
  * Called after the client-side challenge from createDepositChallenge
- * succeeds. Finds the resulting transaction by refId (there's no other
- * shared key between a challenge and the transaction it produces) — read
- * only, no DB write, so callers that need to create a dependent row (e.g. a
- * PaymentLink) first can do so using this result as the source of truth for
- * the actual on-chain amount before recording the transaction itself via
- * recordTransaction.
+ * succeeds. Finds the resulting transaction.
+ *
+ * Circle's listTransactions response does not reliably echo back the
+ * developer-supplied refId on the transaction object, so matching on
+ * tx.refId === refId never succeeds in practice. Instead we match on the
+ * fields Circle *does* return: destination address + amount, restricted to
+ * transactions created no earlier than shortly before the deposit
+ * challenge was issued (so we don't accidentally match some older,
+ * unrelated transaction of the same amount to the same treasury wallet),
+ * and excluding any transaction already recorded against another link.
  *
  * There's a short, variable indexing lag between the challenge executing
  * client-side and the transaction showing up via listTransactions — Arc
@@ -149,13 +153,17 @@ function sleep(ms: number) {
 export async function findDepositTransaction({
   userToken,
   fromWalletId,
-  refId,
+  destinationAddress,
+  amountMicros,
+  notBefore,
   maxAttempts = 5,
   delayMs = 1500,
 }: {
   userToken: string;
   fromWalletId: string;
-  refId: string;
+  destinationAddress: string;
+  amountMicros: bigint;
+  notBefore: Date;
   maxAttempts?: number;
   delayMs?: number;
 }) {
@@ -164,10 +172,36 @@ export async function findDepositTransaction({
       userToken,
       walletIds: [fromWalletId],
     });
+    const transactions = response.data?.transactions ?? [];
 
-    const transaction = (response.data?.transactions ?? []).find(
-      (tx) => tx.refId === refId,
+    const alreadyUsed = await db.transaction.findMany({
+      where: {
+        type: "DEPOSIT",
+        circleTxId: { in: transactions.map((tx) => tx.id) },
+      },
+      select: { circleTxId: true },
+    });
+    const usedIds = new Set(alreadyUsed.map((t) => t.circleTxId));
+
+    const candidates = transactions.filter((tx) => {
+      if (usedIds.has(tx.id)) return false;
+      if (tx.destinationAddress?.toLowerCase() !== destinationAddress.toLowerCase()) return false;
+      const txAmountMicros = BigInt(
+        Math.round(Number(tx.amounts?.[0] ?? "0") * 1_000_000),
+      );
+      if (txAmountMicros !== amountMicros) return false;
+      if (tx.createDate && new Date(tx.createDate) < notBefore) return false;
+      return true;
+    });
+
+    // Earliest matching candidate after notBefore — closest to when this
+    // deposit challenge was actually issued.
+    candidates.sort(
+      (a, b) =>
+        new Date(a.createDate ?? 0).getTime() - new Date(b.createDate ?? 0).getTime(),
     );
+    const transaction = candidates[0];
+
     if (transaction) {
       return {
         circleTxId: transaction.id,
@@ -183,7 +217,6 @@ export async function findDepositTransaction({
 
   throw new DepositNotIndexedYetError();
 }
-
 export async function recordTransaction(data: {
   paymentLinkId: string;
   type: "DEPOSIT" | "PAYOUT" | "REFUND";

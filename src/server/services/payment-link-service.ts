@@ -131,7 +131,7 @@ export async function confirmLinkDeposit({
   if (link.status === "ACTIVE") {
     return { linkId: link.id, amountMicros: link.amountMicros };
   }
-  if (link.status !== "PENDING_DEPOSIT" || !link.refId) {
+  if (link.status !== "PENDING_DEPOSIT") {
     throw new Error(`Link is not awaiting a deposit (status: ${link.status})`);
   }
 
@@ -143,7 +143,9 @@ export async function confirmLinkDeposit({
   const deposit = await findDepositTransaction({
     userToken,
     fromWalletId: senderWallet.circleWalletId,
-    refId: link.refId,
+    destinationAddress: treasuryWallet.address,
+    amountMicros: link.amountMicros,
+    notBefore: new Date(link.createdAt.getTime() - 5 * 60_000),
   });
 
   const updated = await db.paymentLink.update({
@@ -189,11 +191,12 @@ export async function reconcilePendingDeposits({
 
   for (const link of pending) {
     try {
-      if (!link.refId) {
+       {
         results.push({ linkId: link.id, promoted: false, error: "missing refId" });
         continue;
       }
-
+  for (const link of pending) {
+    try {
       const senderWallet = await db.wallet.findFirst({
         where: { userId: link.senderId, role: "PERSONAL" },
       });
@@ -202,6 +205,10 @@ export async function reconcilePendingDeposits({
         continue;
       }
 
+      const treasuryWallet = await db.wallet.findUniqueOrThrow({
+        where: { id: link.treasuryWalletId },
+      });
+
       const { userToken } = await circleUserClient
         .createUserToken({ userId: link.senderId })
         .then((r) => r.data!);
@@ -209,12 +216,10 @@ export async function reconcilePendingDeposits({
       const deposit = await findDepositTransaction({
         userToken,
         fromWalletId: senderWallet.circleWalletId,
-        refId: link.refId,
+        destinationAddress: treasuryWallet.address,
+        amountMicros: link.amountMicros,
+        notBefore: new Date(link.createdAt.getTime() - 5 * 60_000),
         maxAttempts: 1, // the job's own recurring schedule is the retry loop
-      });
-
-      const treasuryWallet = await db.wallet.findUniqueOrThrow({
-        where: { id: link.treasuryWalletId },
       });
 
       await db.paymentLink.update({
