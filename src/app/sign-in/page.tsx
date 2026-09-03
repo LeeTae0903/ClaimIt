@@ -99,9 +99,19 @@ function SignInForm() {
     setLoading("guest");
     const { error } = await authClient.signIn.anonymous();
     if (error) {
-      setError(error.message ?? "Couldn't continue as guest.");
-      setLoading(null);
-      return;
+      // Every visitor is silently handed a working anonymous session on
+      // their very first request (see middleware) so the rest of the app
+      // always has someone to act as — by the time this button is
+      // clickable, that session already exists. Better Auth's anonymous
+      // plugin then refuses a second one with this specific code. That's
+      // not a failure from the user's point of view: they already have a
+      // working guest session, so just continue instead of showing an
+      // error they can't do anything about.
+      if (error.code !== "ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY") {
+        setError(error.message ?? "Couldn't continue as guest.");
+        setLoading(null);
+        return;
+      }
     }
     router.push(redirectTo);
   }
