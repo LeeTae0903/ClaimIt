@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { reconcilePendingDeposits } from "@/server/services/payment-link-service";
+import { reconcilePendingBatches } from "@/server/services/batch-service";
 
 // Not user-facing — meant to be hit by a scheduler (Vercel Cron in
 // production; invoked manually for now, since real scheduling needs a
@@ -11,8 +12,11 @@ async function handleReconcile(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results = await reconcilePendingDeposits();
-  return NextResponse.json({ results });
+  const [results, batchResults] = await Promise.all([
+    reconcilePendingDeposits(),
+    reconcilePendingBatches(),
+  ]);
+  return NextResponse.json({ results, batchResults });
 }
 
 export async function GET(request: NextRequest) {

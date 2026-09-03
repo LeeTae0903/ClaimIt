@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, FormEvent } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { CreateLinkForm } from "@/components/CreateLinkForm";
+import { CreateGiveawayForm } from "@/components/CreateGiveawayForm";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 import {
   Send,
@@ -26,6 +27,7 @@ import {
   QrCode,
   Sparkles,
   ShieldCheck,
+  Layers,
 } from "lucide-react";
 
 type SentLink = {
@@ -112,6 +114,7 @@ export function DashboardView({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [internalModalOpen, setInternalModalOpen] = useState(false);
+  const [isGiveawayModalOpen, setIsGiveawayModalOpen] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
 
@@ -159,19 +162,19 @@ export function DashboardView({
     fetchDashboardData();
   }, [fetchDashboardData]);
 
- async function handleCopyLink(linkId: string) {
-  try {
-    const res = await fetch(`/api/links/${linkId}/regenerate`, { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Couldn't get a link to copy.");
-    const claimUrl = `${window.location.origin}/claim/${data.claimToken}`;
-    navigator.clipboard.writeText(claimUrl);
-    setCopiedId(linkId);
-    setTimeout(() => setCopiedId(null), 2000);
-  } catch {
-    alert("Couldn't get a shareable link right now — please try again.");
+  async function handleCopyLink(linkId: string) {
+    try {
+      const res = await fetch(`/api/links/${linkId}/regenerate`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't get a link to copy.");
+      const claimUrl = `${window.location.origin}/claim/${data.claimToken}`;
+      navigator.clipboard.writeText(claimUrl);
+      setCopiedId(linkId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      alert("Couldn't get a shareable link right now — please try again.");
+    }
   }
-}
 
   function handleCopyAddress() {
     if (!userWallet?.address) return;
@@ -348,14 +351,24 @@ export function DashboardView({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Create Loot Link</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsGiveawayModalOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-800 hover:text-white transition-all shadow-sm active:scale-[0.98]"
+          >
+            <Layers className="h-4 w-4 text-blue-400" />
+            <span>Create Giveaway</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98]"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create Loot Link</span>
+          </button>
+        </div>
       </div>
 
       {/* Sent Links View */}
@@ -522,6 +535,35 @@ export function DashboardView({
             </div>
 
             <CreateLinkForm
+              onSuccess={() => {
+                fetchDashboardData();
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* CREATE GIVEAWAY MODAL */}
+      {isGiveawayModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-900/95 p-6 md:p-8 shadow-2xl space-y-6 text-zinc-100 my-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  <Layers className="h-4 w-4" />
+                </div>
+                <h3 className="text-lg font-bold text-white tracking-tight">Create Giveaway</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGiveawayModalOpen(false)}
+                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <CreateGiveawayForm
               onSuccess={() => {
                 fetchDashboardData();
               }}

@@ -1,10 +1,12 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
-import { anonymous, emailOTP } from "better-auth/plugins";
+import { anonymous, emailOTP, siwe } from "better-auth/plugins";
+import { generateSiweNonce } from "viem/siwe";
 import { importPKCS8, SignJWT } from "jose";
 import { db } from "@/lib/db";
 import { sendOtpEmail } from "@/lib/email";
+import { arcPublicClient } from "@/lib/chain/arc";
 
 const APPLE_ENV_VARS = [
   "APPLE_CLIENT_ID",
@@ -41,6 +43,23 @@ const getBaseURL = () => {
   return "http://localhost:3000";
 };
 
+/**
+ * The host a SIWE message must name.
+ *
+ * The browser signs a message containing `window.location.host`, and the
+ * plugin rejects the signature unless it matches this exactly — so this has
+ * to be the host people actually browse, not whatever BETTER_AUTH_URL
+ * happens to say when it's unset. Derived from the same getBaseURL() the
+ * rest of auth already trusts, so there's only one source of truth for it.
+ */
+function appHost(): string {
+  try {
+    return new URL(getBaseURL()).host;
+  } catch {
+    return "localhost:3000";
+  }
+}
+
 export const auth = betterAuth({
   baseURL: getBaseURL(),
   database: prismaAdapter(db, {
@@ -66,6 +85,24 @@ export const auth = betterAuth({
       },
     }),
     anonymous(),
+    siwe({
+      domain: appHost(),
+      // No email step: proving control of the address is the whole sign-in.
+      // Better Auth still needs a unique email internally, and derives one
+      // from the address plus this domain.
+      anonymous: true,
+      emailDomainName: appHost(),
+      getNonce: async () => generateSiweNonce(),
+      // Verified through the chain's own client rather than a plain ECDSA
+      // recover, so smart-contract accounts (ERC-1271) work too — those
+      // can't be checked off-chain at all.
+      verifyMessage: async ({ message, signature, address }) =>
+        arcPublicClient.verifyMessage({
+          address: address as `0x${string}`,
+          message,
+          signature: signature as `0x${string}`,
+        }),
+    }),
     // Must stay last: lets server actions calling auth.api.* set cookies.
     nextCookies(),
   ],

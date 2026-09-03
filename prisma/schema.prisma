@@ -18,14 +18,14 @@ datasource db {
 }
 
 model User {
-  id            String    @id
+  id            String   @id
   name          String
   email         String
-  emailVerified Boolean   @default(false)
+  emailVerified Boolean  @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  isAnonymous   Boolean?  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  isAnonymous   Boolean? @default(false)
   sessions      Session[]
   accounts      Account[]
 
@@ -33,11 +33,13 @@ model User {
   // Nullable: Better Auth creates the User row on sign-up/sign-in and knows
   // nothing about Circle. A Circle wallet is provisioned and backfilled here
   // right after, via a Better Auth database hook (see Milestone 4).
-  circleUserId String?       @unique
-  wallets      Wallet[]
-  sentLinks    PaymentLink[] @relation("SentLinks")
-  claims       Claim[]
-  auditLogs    AuditLog[]
+  circleUserId    String?         @unique
+  wallets         Wallet[]
+  sentLinks       PaymentLink[]   @relation("SentLinks")
+  sentBatches     LinkBatch[]     @relation("SentBatches")
+  walletAddresses WalletAddress[]
+  claims          Claim[]
+  auditLogs       AuditLog[]
 
   @@unique([email])
   @@map("user")
@@ -60,23 +62,44 @@ model Session {
 }
 
 model Account {
-  id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  scope                 String?
-  password              String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                     String    @id
+  accountId              String
+  providerId             String
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken            String?
+  refreshToken           String?
+  idToken                String?
+  accessTokenExpiresAt   DateTime?
+  refreshTokenExpiresAt  DateTime?
+  scope                  String?
+  password               String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([userId])
   @@map("account")
+}
+
+/// Owned by Better Auth's siwe plugin, which addresses it as `walletAddress`
+/// — the Prisma model name has to stay WalletAddress for `prisma.walletAddress`
+/// to resolve. Distinct from the domain `Wallet` model: this records "this
+/// address proves this account's identity", not "this is a wallet we can move
+/// funds through" — signing in with a wallet still provisions a normal
+/// Circle-managed Wallet the same as any other login method.
+model WalletAddress {
+  id        String   @id
+  userId    String
+  address   String
+  chainId   Int
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([address, chainId])
+  @@index([userId])
+  @@map("walletAddress")
 }
 
 model Verification {
@@ -127,6 +150,43 @@ enum LinkStatus {
   CANCELLED
 }
 
+enum BatchStatus {
+  PENDING_DEPOSIT
+  ACTIVE
+  FAILED
+}
+
+/// A giveaway: one deposit funding many links at once.
+///
+/// Exists because a batch can't be modelled as N independent links sharing a
+/// deposit — PaymentLink.refId is unique and a Transaction belongs to one
+/// link, both deliberately, since that 1:1 tie is what makes single-link
+/// reconciliation unambiguous. The batch owns the refId and the deposit
+/// instead, and its links carry only their own share.
+model LinkBatch {
+  id               String      @id @default(cuid())
+  senderId         String
+  treasuryWalletId String
+  /// The sum the sender is asked to deposit. Activation requires the
+  /// confirmed on-chain amount to cover it — see confirmBatchDeposit.
+  totalMicros      BigInt
+  linkCount        Int
+  status           BatchStatus @default(PENDING_DEPOSIT)
+  refId            String?     @unique
+  depositTxId      String?
+  /// What actually arrived on-chain, which is the number that matters if it
+  /// ever disagrees with totalMicros.
+  depositedMicros  BigInt?
+  createdAt        DateTime    @default(now())
+
+  sender       User          @relation("SentBatches", fields: [senderId], references: [id])
+  links        PaymentLink[]
+  transactions Transaction[]
+
+  @@index([senderId])
+  @@index([status, createdAt])
+}
+
 model PaymentLink {
   id               String     @id @default(cuid())
   tokenHash        String     @unique
@@ -140,15 +200,20 @@ model PaymentLink {
   // Ties this row to the on-chain deposit before it's confirmed. Only
   // meaningful while status = PENDING_DEPOSIT; the reconciliation job uses
   // it to find the transaction if the synchronous confirm never completes.
+  // Null for links funded as part of a batch — the batch holds the refId.
   refId            String?    @unique
+  // Set for links created as part of a giveaway; null for standalone links.
+  batchId          String?
   createdAt        DateTime   @default(now())
   claimedAt        DateTime?
 
   sender       User          @relation("SentLinks", fields: [senderId], references: [id])
+  batch        LinkBatch?    @relation(fields: [batchId], references: [id])
   claim        Claim?
   transactions Transaction[]
 
   @@index([senderId])
+  @@index([batchId])
   @@index([status, expiresAt])
   @@index([status, createdAt])
 }
@@ -184,7 +249,10 @@ enum TxType {
 
 model Transaction {
   id            String   @id @default(cuid())
-  paymentLinkId String
+  // Exactly one of these is set: a payout belongs to a link, while a batch
+  // deposit funds many links at once and so belongs to the batch.
+  paymentLinkId String?
+  batchId       String?
   type          TxType
   circleTxId    String   @unique
   fromAddress   String
@@ -196,9 +264,11 @@ model Transaction {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  paymentLink PaymentLink @relation(fields: [paymentLinkId], references: [id])
+  paymentLink PaymentLink? @relation(fields: [paymentLinkId], references: [id])
+  batch       LinkBatch?   @relation(fields: [batchId], references: [id])
 
   @@index([paymentLinkId])
+  @@index([batchId])
 }
 
 model AuditLog {

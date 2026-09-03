@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
+import { signInWithWallet } from "@/lib/wallet/connect";
 import { SocialSignInButton } from "@/components/SocialSignInButton";
 import {
   Gift,
@@ -13,6 +14,7 @@ import {
   AlertCircle,
   KeyRound,
   ArrowLeft,
+  Wallet,
 } from "lucide-react";
 
 function GoogleIcon() {
@@ -77,6 +79,19 @@ function SignInForm() {
     });
     if (error) setError(error.message ?? "Apple sign-in failed.");
     setLoading(null);
+  }
+
+  async function withWallet() {
+    setError(null);
+    setLoading("wallet");
+    try {
+      await signInWithWallet();
+      router.push(redirectTo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Wallet sign-in failed.");
+    } finally {
+      setLoading(null);
+    }
   }
 
   async function asGuest() {
@@ -151,6 +166,12 @@ function SignInForm() {
             disabled={loading !== null}
             icon={<AppleIcon />}
             label="Continue with Apple"
+          />
+          <SocialSignInButton
+            onClick={withWallet}
+            disabled={loading !== null}
+            icon={<Wallet className="h-5 w-5 text-blue-400" />}
+            label={loading === "wallet" ? "Confirm in your wallet…" : "Continue with wallet"}
           />
         </div>
 

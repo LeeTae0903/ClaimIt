@@ -217,8 +217,17 @@ export async function findDepositTransaction({
 
   throw new DepositNotIndexedYetError();
 }
+
+/**
+ * Records one transfer against either a PaymentLink or a LinkBatch — never
+ * both, and the Transaction_one_owner check constraint enforces that at the
+ * database level too. paymentLinkId stays the common case (every payout, and
+ * every single-link deposit); batchId is for a giveaway's one deposit that
+ * funds many links at once.
+ */
 export async function recordTransaction(data: {
-  paymentLinkId: string;
+  paymentLinkId?: string;
+  batchId?: string;
   type: "DEPOSIT" | "PAYOUT" | "REFUND";
   circleTxId: string;
   fromAddress: string;
