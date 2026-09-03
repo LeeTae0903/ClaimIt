@@ -31,6 +31,23 @@ function formatUsdc(amountMicros: string): string {
   return (Number(amountMicros) / 1_000_000).toFixed(2);
 }
 
+// The Circle PIN-setup widget loads a cross-origin iframe, which can be slow
+// (cold start) or occasionally never load at all (blocked third-party
+// storage — most common in Incognito/private windows, which restrict it by
+// default). Priming it (getDeviceId) happens silently in the background here,
+// before the user asked for it — so if it hangs, we don't want them stuck
+// forever. Give it a few seconds; if it doesn't come back, just skip the
+// proactive banner and fall back to the existing reactive flow (claim's own
+// NO_WALLET redirect on submit).
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for the wallet SDK.")), ms);
+    }),
+  ]);
+}
+
 export function ClaimPageClient({ token }: { token: string }) {
   const router = useRouter();
   const { data: session, isPending: sessionPending } = useSession();
@@ -82,7 +99,7 @@ export function ClaimPageClient({ token }: { token: string }) {
         } else if (data.status === "pending-pin-setup") {
           try {
             const sdk = getWalletSdk(data.circleAppId);
-            await sdk.getDeviceId();
+            await withTimeout(sdk.getDeviceId(), 8000);
             if (cancelled) return;
             setPinSetup({
               challengeId: data.challengeId,

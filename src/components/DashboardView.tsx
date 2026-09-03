@@ -76,6 +76,23 @@ function shortenAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+// The Circle PIN-setup widget loads a cross-origin iframe, which can be slow
+// (cold start) or occasionally never load at all (blocked third-party
+// storage — most common in Incognito/private windows, which restrict it by
+// default). Priming it (getDeviceId) happens silently in the background here,
+// before the user asked for it — so if it hangs, we don't want them stuck
+// forever on "Checking wallet address..." with no way out. Give it a few
+// seconds; if it doesn't come back, just skip the proactive banner and fall
+// back to the existing reactive flow (Create Loot Link's NO_WALLET redirect).
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for the wallet SDK.")), ms);
+    }),
+  ]);
+}
+
 function StatusBadge({ status }: { status: string }) {
   let badgeStyle = "bg-zinc-800 text-zinc-400 border-zinc-700";
   let Icon = Clock;
@@ -235,7 +252,7 @@ export function DashboardView({
               // WalletSetup.tsx does before its own challenge screen.
               try {
                 const sdk = getWalletSdk(ensureData.circleAppId);
-                await sdk.getDeviceId();
+                await withTimeout(sdk.getDeviceId(), 8000);
                 setPinSetup({
                   challengeId: ensureData.challengeId,
                   userToken: ensureData.userToken,
