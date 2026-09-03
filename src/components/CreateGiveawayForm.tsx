@@ -132,17 +132,17 @@ export function CreateGiveawayForm({ onSuccess }: { onSuccess?: () => void }) {
   }
 
   function handleCopy(link: GiveawayLink) {
-    const text = link.password ? `${link.claimUrl}  (password: ${link.password})` : link.claimUrl;
-    navigator.clipboard.writeText(text);
+    // Just the URL — pasting "<url> (password: ...)" somewhere doesn't
+    // navigate anywhere, and the password's already shown as its own badge
+    // right next to the link below.
+    navigator.clipboard.writeText(link.claimUrl);
     setCopiedId(link.linkId);
     setTimeout(() => setCopiedId(null), 2000);
   }
 
   function handleCopyAll() {
     if (!links) return;
-    const text = links
-      .map((l) => (l.password ? `${l.claimUrl}  (password: ${l.password})` : l.claimUrl))
-      .join("\n");
+    const text = links.map((l) => l.claimUrl).join("\n");
     navigator.clipboard.writeText(text);
     setCopiedId("all");
     setTimeout(() => setCopiedId(null), 2000);

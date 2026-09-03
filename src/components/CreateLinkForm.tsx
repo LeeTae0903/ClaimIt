@@ -124,8 +124,10 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
 
   function handleCopy() {
     if (!claimUrl) return;
-    const text = revealedPassword ? `${claimUrl}  (password: ${revealedPassword})` : claimUrl;
-    navigator.clipboard.writeText(text);
+    // Just the URL — pasting "<url> (password: ...)" somewhere doesn't
+    // navigate anywhere. The password has its own copy button right below,
+    // shown only when one exists.
+    navigator.clipboard.writeText(claimUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
