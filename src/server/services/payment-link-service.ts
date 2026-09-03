@@ -170,7 +170,7 @@ export async function confirmLinkDeposit({
   return { linkId: updated.id, amountMicros: updated.amountMicros.toString() };
 }
 
-/**/**
+/**
  * Issues a brand-new claim token for an existing link, invalidating the
  * old one. Needed because the raw claim token is only ever returned once,
  * right when the link is created (only its hash is persisted, by design —
@@ -199,6 +199,8 @@ export async function regenerateClaimLink({
 
   return { linkId: link.id, claimToken: rawToken };
 }
+
+/**
  * The safety net itself. Scans PENDING_DEPOSIT links old enough that the
  * synchronous confirm should have already run (or failed), and promotes
  * any whose deposit actually landed on-chain — automatically recovering
