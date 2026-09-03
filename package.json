@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "circle:register-secret": "tsx scripts/register-entity-secret.ts",
-    "circle:setup-treasury": "tsx scripts/setup-treasury.ts"
+        "circle:setup-treasury": "tsx scripts/setup-treasury.ts",
+    "security:check-db": "tsx scripts/check-db-exposure.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.6.25",
