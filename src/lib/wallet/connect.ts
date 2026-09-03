@@ -2,12 +2,7 @@
 
 import { createWalletClient, custom, getAddress } from "viem";
 import { createSiweMessage } from "viem/siwe";
-import { arcTestnet } from "@/lib/chain/arc";
-
-// Sign-in only: this app authenticates with a connected wallet but still
-// provisions and uses a normal Circle-managed wallet for every deposit,
-// payout and claim, exactly like any other login method. Sending USDC
-// directly from the connected external wallet is out of scope here.
+import { ARC_USDC_ADDRESS, ERC20_ABI, arcTestnet, arcPublicClient } from "@/lib/chain/arc";
 
 type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -16,7 +11,7 @@ type Eip1193Provider = {
 export class NoWalletExtensionError extends Error {
   constructor() {
     super(
-      "No wallet extension found. Install MetaMask, Rabby or OKX Wallet to sign in with a wallet.",
+      "No wallet extension found. Install MetaMask, Rabby or OKX Wallet to use this.",
     );
     this.name = "NoWalletExtensionError";
   }
@@ -46,6 +41,26 @@ export function hasInjectedWallet(): boolean {
     typeof window !== "undefined" &&
     !!(window as unknown as { ethereum?: unknown }).ethereum
   );
+}
+
+/**
+ * The already-authorised account, or null.
+ *
+ * `eth_accounts` never prompts — it only reports what the user has previously
+ * granted. That's what makes it safe to call on mount: someone who signed in
+ * with their wallet shouldn't have to press Connect again just to see their
+ * own balance.
+ */
+export async function getConnectedAccount(): Promise<string | null> {
+  if (!hasInjectedWallet()) return null;
+  try {
+    const accounts = (await provider().request({
+      method: "eth_accounts",
+    })) as string[];
+    return accounts?.length ? getAddress(accounts[0]) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function connectWallet(): Promise<string> {
@@ -100,6 +115,16 @@ export async function ensureArcChain(): Promise<void> {
       throw addErr;
     }
   }
+}
+
+/** Reads the connected wallet's own USDC balance on Arc. */
+export async function getUsdcBalanceMicros(address: string): Promise<bigint> {
+  return arcPublicClient.readContract({
+    address: ARC_USDC_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [getAddress(address)],
+  });
 }
 
 /**
@@ -162,5 +187,39 @@ export async function signInWithWallet(): Promise<void> {
   if (!verifyRes.ok) {
     const data = await verifyRes.json().catch(() => ({}));
     throw new Error(data.message ?? "Wallet sign-in was rejected.");
+  }
+}
+
+/**
+ * Signs and broadcasts a USDC transfer straight from the connected wallet
+ * into escrow. Returns the transaction hash — the server re-derives the
+ * amount and sender from the chain itself rather than trusting this call's
+ * arguments, so nothing here needs to be tamper-proof.
+ */
+export async function sendUsdc({
+  from,
+  to,
+  amountMicros,
+}: {
+  from: string;
+  to: string;
+  amountMicros: bigint;
+}): Promise<string> {
+  const walletClient = createWalletClient({
+    chain: arcTestnet,
+    transport: custom(provider()),
+  });
+
+  try {
+    return await walletClient.writeContract({
+      account: getAddress(from),
+      address: ARC_USDC_ADDRESS,
+      abi: ERC20_ABI,
+      functionName: "transfer",
+      args: [getAddress(to), amountMicros],
+    });
+  } catch (err) {
+    if (isUserRejection(err)) throw new WalletRejectedError();
+    throw err;
   }
 }

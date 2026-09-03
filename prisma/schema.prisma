@@ -177,6 +177,10 @@ model LinkBatch {
   /// What actually arrived on-chain, which is the number that matters if it
   /// ever disagrees with totalMicros.
   depositedMicros  BigInt?
+  // Set when the deposit was a direct on-chain transfer from the sender's
+  // own wallet rather than routed through Circle — mutually exclusive with
+  // refId in practice, since a batch only ever takes one funding path.
+  externalTxHash   String?     @unique
   createdAt        DateTime    @default(now())
 
   sender       User          @relation("SentBatches", fields: [senderId], references: [id])
@@ -204,6 +208,10 @@ model PaymentLink {
   refId            String?    @unique
   // Set for links created as part of a giveaway; null for standalone links.
   batchId          String?
+  // Set when this link was funded by a direct on-chain transfer from the
+  // sender's own connected wallet, verified against the chain itself,
+  // rather than through a Circle deposit challenge (refId).
+  externalTxHash   String?    @unique
   createdAt        DateTime   @default(now())
   claimedAt        DateTime?
 
@@ -254,7 +262,12 @@ model Transaction {
   paymentLinkId String?
   batchId       String?
   type          TxType
-  circleTxId    String   @unique
+  // Null for a self-signed on-chain deposit, which has onchainTxHash
+  // instead. A DB check constraint (Transaction_has_identifier, added by
+  // the external-wallet-deposits migration) enforces that at least one of
+  // the two is always set.
+  circleTxId    String?  @unique
+  onchainTxHash String?  @unique
   fromAddress   String
   toAddress     String
   amountMicros  BigInt

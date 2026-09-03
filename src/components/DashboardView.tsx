@@ -5,6 +5,9 @@ import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { CreateLinkForm } from "@/components/CreateLinkForm";
 import { CreateGiveawayForm } from "@/components/CreateGiveawayForm";
+import { ExternalLinkForm } from "@/components/ExternalLinkForm";
+import { ExternalGiveawayForm } from "@/components/ExternalGiveawayForm";
+import { getConnectedAccount } from "@/lib/wallet/connect";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 import {
   Send,
@@ -54,6 +57,8 @@ type UserWallet = {
   blockchain: string;
 };
 
+type FundingSource = "builtin" | "external";
+
 function formatUsdc(amountMicros: string): string {
   return (Number(amountMicros) / 1_000_000).toFixed(2);
 }
@@ -100,6 +105,44 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/** Segmented "Built-in wallet / My wallet" switch shown at the top of both create modals. */
+function FundingSourceToggle({
+  value,
+  onChange,
+}: {
+  value: FundingSource;
+  onChange: (source: FundingSource) => void;
+}) {
+  return (
+    <div className="flex rounded-xl border border-zinc-800 bg-zinc-950/80 p-1">
+      <button
+        type="button"
+        onClick={() => onChange("builtin")}
+        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
+          value === "builtin"
+            ? "bg-zinc-800 text-white shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200"
+        }`}
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        <span>Built-in Wallet</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("external")}
+        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all ${
+          value === "external"
+            ? "bg-zinc-800 text-white shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200"
+        }`}
+      >
+        <Wallet className="h-3.5 w-3.5" />
+        <span>My Wallet</span>
+      </button>
+    </div>
+  );
+}
+
 export function DashboardView({
   isCreateModalOpen,
   setIsCreateModalOpen,
@@ -118,6 +161,15 @@ export function DashboardView({
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
 
+  // Which wallet funds the next link/giveaway. Defaulted once — via
+  // getConnectedAccount(), which never prompts — to "external" for someone
+  // who already has a browser wallet authorised for this site, since that's
+  // a good proxy for "signed in with a wallet". Each modal keeps its own
+  // state after that so switching one doesn't flip the other mid-flow.
+  const [defaultSource, setDefaultSource] = useState<FundingSource>("builtin");
+  const [linkSource, setLinkSource] = useState<FundingSource | null>(null);
+  const [giveawaySource, setGiveawaySource] = useState<FundingSource | null>(null);
+
   // Withdraw state
   const [withdrawAddress, setWithdrawAddress] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("10");
@@ -127,6 +179,15 @@ export function DashboardView({
 
   const modalOpen = isCreateModalOpen ?? internalModalOpen;
   const setModalOpen = setIsCreateModalOpen ?? setInternalModalOpen;
+
+  const activeLinkSource = linkSource ?? defaultSource;
+  const activeGiveawaySource = giveawaySource ?? defaultSource;
+
+  useEffect(() => {
+    getConnectedAccount()
+      .then((addr) => setDefaultSource(addr ? "external" : "builtin"))
+      .catch(() => setDefaultSource("builtin"));
+  }, []);
 
   const fetchDashboardData = useCallback(() => {
     fetch("/api/dashboard/sent")
@@ -534,11 +595,21 @@ export function DashboardView({
               </button>
             </div>
 
-            <CreateLinkForm
-              onSuccess={() => {
-                fetchDashboardData();
-              }}
-            />
+            <FundingSourceToggle value={activeLinkSource} onChange={setLinkSource} />
+
+            {activeLinkSource === "builtin" ? (
+              <CreateLinkForm
+                onSuccess={() => {
+                  fetchDashboardData();
+                }}
+              />
+            ) : (
+              <ExternalLinkForm
+                onSuccess={() => {
+                  fetchDashboardData();
+                }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -563,11 +634,21 @@ export function DashboardView({
               </button>
             </div>
 
-            <CreateGiveawayForm
-              onSuccess={() => {
-                fetchDashboardData();
-              }}
-            />
+            <FundingSourceToggle value={activeGiveawaySource} onChange={setGiveawaySource} />
+
+            {activeGiveawaySource === "builtin" ? (
+              <CreateGiveawayForm
+                onSuccess={() => {
+                  fetchDashboardData();
+                }}
+              />
+            ) : (
+              <ExternalGiveawayForm
+                onSuccess={() => {
+                  fetchDashboardData();
+                }}
+              />
+            )}
           </div>
         </div>
       )}
