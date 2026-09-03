@@ -5,7 +5,7 @@ import { reconcilePendingDeposits } from "@/server/services/payment-link-service
 // production; invoked manually for now, since real scheduling needs a
 // deployed environment, same constraint as webhooks and Apple Sign In).
 // Protected by a shared secret rather than a user session.
-export async function POST(request: NextRequest) {
+async function handleReconcile(request: NextRequest) {
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -13,4 +13,12 @@ export async function POST(request: NextRequest) {
 
   const results = await reconcilePendingDeposits();
   return NextResponse.json({ results });
+}
+
+export async function GET(request: NextRequest) {
+  return handleReconcile(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleReconcile(request);
 }
