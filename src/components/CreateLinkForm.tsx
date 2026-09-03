@@ -13,6 +13,8 @@ import {
   Share2,
   ShieldCheck,
   Gift,
+  KeyRound,
+  Sparkles,
 } from "lucide-react";
 
 type PrepareResponse = {
@@ -21,6 +23,9 @@ type PrepareResponse = {
   userToken: string;
   encryptionKey: string;
   claimToken: string;
+  // Only set when the sender asked us to generate one — a password they
+  // typed themselves is never echoed back, since they already know it.
+  generatedPassword: string | null;
   circleAppId: string;
 };
 
@@ -54,11 +59,14 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
   const router = useRouter();
   const [amount, setAmount] = useState("10");
   const [password, setPassword] = useState("");
+  const [generatePassword, setGeneratePassword] = useState(false);
   const [expiresInHours, setExpiresInHours] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claimUrl, setClaimUrl] = useState<string | null>(null);
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedPassword, setCopiedPassword] = useState(false);
 
   const presets = ["5", "10", "25", "50", "100"];
 
@@ -74,6 +82,7 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
         body: JSON.stringify({
           amount,
           password: password || undefined,
+          withPassword: generatePassword,
           expiresInHours: expiresInHours || undefined,
         }),
       });
@@ -87,7 +96,7 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
         throw new Error(prepareData.error ?? "Couldn't create Loot link.");
       }
 
-      const { linkId, challengeId, userToken, encryptionKey, claimToken, circleAppId } =
+      const { linkId, challengeId, userToken, encryptionKey, claimToken, generatedPassword, circleAppId } =
         prepareData as PrepareResponse;
 
       const sdk = getWalletSdk(circleAppId);
@@ -104,6 +113,7 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
       await confirmDepositWithRetry(linkId);
 
       setClaimUrl(`${window.location.origin}/claim/${claimToken}`);
+      setRevealedPassword(generatedPassword ?? (password || null));
       onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -114,9 +124,17 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
 
   function handleCopy() {
     if (!claimUrl) return;
-    navigator.clipboard.writeText(claimUrl);
+    const text = revealedPassword ? `${claimUrl}  (password: ${revealedPassword})` : claimUrl;
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function handleCopyPassword() {
+    if (!revealedPassword) return;
+    navigator.clipboard.writeText(revealedPassword);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2000);
   }
 
   if (claimUrl) {
@@ -161,6 +179,28 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
           </button>
         </div>
 
+        {/* Generated Password (shown once — same rule as the claim link itself) */}
+        {revealedPassword && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3.5 flex items-center justify-between gap-3">
+            <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <KeyRound className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
+              Password:{" "}
+              <span className="font-mono text-zinc-100 select-all">{revealedPassword}</span>
+            </span>
+            <button
+              type="button"
+              onClick={handleCopyPassword}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-700 transition-colors flex-shrink-0"
+            >
+              {copiedPassword ? (
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <button
             type="button"
@@ -174,8 +214,10 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
             type="button"
             onClick={() => {
               setClaimUrl(null);
+              setRevealedPassword(null);
               setAmount("10");
               setPassword("");
+              setGeneratePassword(false);
               setExpiresInHours("");
             }}
             className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
@@ -244,10 +286,29 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
         <input
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            if (e.target.value) setGeneratePassword(false);
+          }}
+          disabled={generatePassword}
           placeholder="Set password to unlock Loot"
-          className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600"
+          className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600 disabled:opacity-50"
         />
+        <label className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-2.5 cursor-pointer">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-400">
+            <Sparkles className="h-3.5 w-3.5 text-zinc-500" />
+            Or generate one for me
+          </span>
+          <input
+            type="checkbox"
+            checked={generatePassword}
+            onChange={(e) => {
+              setGeneratePassword(e.target.checked);
+              if (e.target.checked) setPassword("");
+            }}
+            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-blue-500 focus:ring-blue-500"
+          />
+        </label>
       </div>
 
       {/* Expiration Options */}

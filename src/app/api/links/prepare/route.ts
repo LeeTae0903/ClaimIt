@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { hashPassword } from "@/lib/password";
+import { hashPassword, generateReadablePassword } from "@/lib/password";
 import {
   NoWalletError,
   prepareLinkDeposit,
@@ -21,7 +21,16 @@ export async function POST(request: NextRequest) {
   const amountMicros = BigInt(Math.round(amount * 1_000_000));
 
   const password: string | undefined = body.password || undefined;
-  const passwordHash = password ? await hashPassword(password) : null;
+  // "Generate one for me": same helper the giveaway flow already uses, so
+  // a single link gets the same readable-password style. Only kicks in
+  // when the sender didn't type their own — an explicit password always
+  // wins.
+  const withPassword: boolean = !!body.withPassword;
+  const generatedPassword =
+    !password && withPassword ? generateReadablePassword() : null;
+
+  const finalPassword = password ?? generatedPassword;
+  const passwordHash = finalPassword ? await hashPassword(finalPassword) : null;
 
   const expiresInHours: number | undefined = body.expiresInHours
     ? Number(body.expiresInHours)
@@ -49,6 +58,9 @@ export async function POST(request: NextRequest) {
       userToken,
       encryptionKey,
       claimToken: rawToken,
+      // Only set when we generated it — a password the sender typed
+      // themselves is never echoed back, since they already know it.
+      generatedPassword,
       circleAppId: process.env.NEXT_PUBLIC_CIRCLE_APP_ID,
     });
     setUserTokenCookie(response, userToken);
