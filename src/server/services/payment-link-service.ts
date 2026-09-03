@@ -170,7 +170,35 @@ export async function confirmLinkDeposit({
   return { linkId: updated.id, amountMicros: updated.amountMicros.toString() };
 }
 
-/**
+/**/**
+ * Issues a brand-new claim token for an existing link, invalidating the
+ * old one. Needed because the raw claim token is only ever returned once,
+ * right when the link is created (only its hash is persisted, by design —
+ * so a lost token can never be recovered) — this is the only way to get a
+ * working claim URL again for a link whose original token wasn't saved.
+ */
+export async function regenerateClaimLink({
+  senderId,
+  linkId,
+}: {
+  senderId: string;
+  linkId: string;
+}) {
+  const link = await db.paymentLink.findUnique({ where: { id: linkId } });
+  if (!link) throw new LinkNotFoundError();
+  if (link.senderId !== senderId) throw new LinkOwnershipError();
+  if (link.status === "CLAIMED" || link.status === "CANCELLED" || link.status === "EXPIRED") {
+    throw new Error(`Link is not shareable anymore (status: ${link.status})`);
+  }
+
+  const rawToken = generateClaimToken();
+  await db.paymentLink.update({
+    where: { id: link.id },
+    data: { tokenHash: hashClaimToken(rawToken) },
+  });
+
+  return { linkId: link.id, claimToken: rawToken };
+}
  * The safety net itself. Scans PENDING_DEPOSIT links old enough that the
  * synchronous confirm should have already run (or failed), and promotes
  * any whose deposit actually landed on-chain — automatically recovering

@@ -159,12 +159,19 @@ export function DashboardView({
     fetchDashboardData();
   }, [fetchDashboardData]);
 
-  function handleCopyLink(linkId: string) {
-    const claimUrl = `${window.location.origin}/claim/${linkId}`;
+ async function handleCopyLink(linkId: string) {
+  try {
+    const res = await fetch(`/api/links/${linkId}/regenerate`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Couldn't get a link to copy.");
+    const claimUrl = `${window.location.origin}/claim/${data.claimToken}`;
     navigator.clipboard.writeText(claimUrl);
     setCopiedId(linkId);
     setTimeout(() => setCopiedId(null), 2000);
+  } catch {
+    alert("Couldn't get a shareable link right now — please try again.");
   }
+}
 
   function handleCopyAddress() {
     if (!userWallet?.address) return;
