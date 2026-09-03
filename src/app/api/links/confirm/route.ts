@@ -57,9 +57,11 @@ export async function POST(request: NextRequest) {
     if (err instanceof LinkOwnershipError) {
       return NextResponse.json({ error: err.message }, { status: 403 });
     }
+        console.error("[links/confirm] unexpected error:", err);
     return NextResponse.json(
       { error: "Couldn't confirm the deposit.", retryable: false },
       { status: 500 },
     );
+   
   }
 }
