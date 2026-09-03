@@ -7,7 +7,7 @@ import { CreateLinkForm } from "@/components/CreateLinkForm";
 import { CreateGiveawayForm } from "@/components/CreateGiveawayForm";
 import { ExternalLinkForm } from "@/components/ExternalLinkForm";
 import { ExternalGiveawayForm } from "@/components/ExternalGiveawayForm";
-import { getConnectedAccount } from "@/lib/wallet/connect";
+import { getConnectedAccount, getUsdcBalanceMicros } from "@/lib/wallet/connect";
 import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 import {
   Send,
@@ -171,6 +171,12 @@ export function DashboardView({
   const [sent, setSent] = useState<SentLink[] | null>(null);
   const [received, setReceived] = useState<ReceivedClaim[] | null>(null);
   const [userWallet, setUserWallet] = useState<UserWallet | null>(null);
+  // The live on-chain USDC balance of the embedded wallet — separate from
+  // "Total Sent"/"Total Claimed" below, which are just sums of this
+  // person's own link history, not the wallet's actual current balance.
+  // Reads straight from Arc, the same public call the external-wallet
+  // funding flow already uses — no Circle balance API needed.
+  const [walletBalanceMicros, setWalletBalanceMicros] = useState<bigint | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [internalModalOpen, setInternalModalOpen] = useState(false);
@@ -221,6 +227,12 @@ export function DashboardView({
       .catch(() => setDefaultSource("builtin"));
   }, []);
 
+  const refreshBalance = useCallback((address: string) => {
+    getUsdcBalanceMicros(address)
+      .then(setWalletBalanceMicros)
+      .catch(() => setWalletBalanceMicros(null));
+  }, []);
+
   const fetchDashboardData = useCallback(() => {
     fetch("/api/dashboard/sent")
       .then((res) => res.json())
@@ -238,6 +250,7 @@ export function DashboardView({
         if (data.wallet) {
           setUserWallet(data.wallet);
           setPinSetup(null);
+          refreshBalance(data.wallet.address);
         } else {
           // Auto-ensure wallet if DB table doesn't have it yet
           const ensureRes = await fetch("/api/wallet/ensure", { method: "POST" });
@@ -245,6 +258,7 @@ export function DashboardView({
             const ensureData = await ensureRes.json();
             if (ensureData.status === "ready" && ensureData.wallets?.[0]) {
               setUserWallet(ensureData.wallets[0]);
+              refreshBalance(ensureData.wallets[0].address);
             } else if (ensureData.status === "pending-pin-setup") {
               // Wallet + PIN aren't set up yet — surface the inline banner
               // now instead of waiting for Create Loot Link to fail with
@@ -293,6 +307,7 @@ export function DashboardView({
       const confirmData = await confirmRes.json();
       if (confirmData.wallets?.[0]) {
         setUserWallet(confirmData.wallets[0]);
+        refreshBalance(confirmData.wallets[0].address);
       }
       setPinSetup(null);
     } catch (err) {
@@ -389,9 +404,23 @@ export function DashboardView({
               </span>
             </div>
             {userWallet ? (
-              <p className="font-mono text-sm font-bold text-white tracking-tight">
-                {shortenAddress(userWallet.address)}
-              </p>
+              <>
+                <p className="font-mono text-sm font-bold text-white tracking-tight">
+                  {shortenAddress(userWallet.address)}
+                </p>
+                <p className="text-xs text-zinc-400">
+                  {walletBalanceMicros !== null ? (
+                    <>
+                      <span className="font-semibold text-emerald-400">
+                        {formatUsdc(walletBalanceMicros.toString())}
+                      </span>{" "}
+                      USDC available
+                    </>
+                  ) : (
+                    "Checking balance..."
+                  )}
+                </p>
+              </>
             ) : (
               <p className="text-xs text-zinc-500">Checking wallet address...</p>
             )}
