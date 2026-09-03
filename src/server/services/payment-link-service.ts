@@ -167,7 +167,7 @@ export async function confirmLinkDeposit({
     status: deposit.state,
   });
 
-  return { linkId: updated.id, amountMicros: updated.amountMicros };
+  return { linkId: updated.id, amountMicros: updated.amountMicros.toString() };
 }
 
 /**
