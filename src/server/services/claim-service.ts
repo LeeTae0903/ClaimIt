@@ -194,7 +194,8 @@ export async function claimPaymentLink({
 
   const treasuryWallet = await db.wallet.findUniqueOrThrow({
     where: { id: link.treasuryWalletId },
-  });
+  });  
+  console.error("[claim] treasury wallet:", treasuryWallet.circleWalletId, treasuryWallet.address);
 
   try {
     const { circleTxId } = await payoutFromTreasury({
@@ -253,7 +254,7 @@ export async function claimPaymentLink({
   } catch (err) {
     const failReason = err instanceof Error ? err.message : String(err);
     console.error("[claim] payout failed:", failReason, err);
-    
+
     // Release the reservation — a transient or denied payout shouldn't
     // permanently lock out a legitimate retry. The failed attempt is
     // audited before the Claim row is removed. Note: in the narrow case
