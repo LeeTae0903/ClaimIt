@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "@/lib/auth-client";
+import { getWalletSdk } from "@/lib/circle/wallet-sdk";
 import {
   ShieldCheck,
   Zap,
@@ -42,12 +43,101 @@ export function ClaimPageClient({ token }: { token: string }) {
     null,
   );
 
+  // Proactive PIN setup: previously, someone claiming a link only found out
+  // they needed a Circle wallet + PIN when the claim itself failed with
+  // NO_WALLET, which bounced them to a separate /wallet/setup page. Now,
+  // once they're signed in, we check /api/wallet/ensure right away and — if
+  // the PIN isn't set up yet — show it inline, right here, before they ever
+  // try to claim. By the time they hit "Claim", the wallet's already ready.
+  const [walletReady, setWalletReady] = useState<boolean | null>(null);
+  const [pinSetup, setPinSetup] = useState<{
+    challengeId: string;
+    userToken: string;
+    encryptionKey: string;
+    circleAppId: string;
+  } | null>(null);
+  const [pinSettingUp, setPinSettingUp] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch(`/api/links/${token}`)
       .then((res) => res.json())
       .then(setInfo)
       .catch(() => setInfo({ found: false }));
   }, [token]);
+
+  useEffect(() => {
+    if (!session) {
+      setWalletReady(null);
+      setPinSetup(null);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/wallet/ensure", { method: "POST" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(async (data) => {
+        if (cancelled || !data) return;
+        if (data.status === "ready") {
+          setWalletReady(true);
+        } else if (data.status === "pending-pin-setup") {
+          try {
+            const sdk = getWalletSdk(data.circleAppId);
+            await sdk.getDeviceId();
+            if (cancelled) return;
+            setPinSetup({
+              challengeId: data.challengeId,
+              userToken: data.userToken,
+              encryptionKey: data.encryptionKey,
+              circleAppId: data.circleAppId,
+            });
+            setWalletReady(false);
+          } catch {
+            // Couldn't prime the SDK here — don't block the claim form on
+            // it, the NO_WALLET redirect on submit still catches this.
+            setWalletReady(true);
+          }
+        } else {
+          setWalletReady(true);
+        }
+      })
+      .catch(() => {
+        // Don't block claiming on this check failing — NO_WALLET on submit
+        // remains the fallback either way.
+        setWalletReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  async function setUpPin() {
+    if (!pinSetup) return;
+    setPinSettingUp(true);
+    setPinError(null);
+    try {
+      const sdk = getWalletSdk(pinSetup.circleAppId);
+      sdk.setAuthentication({
+        userToken: pinSetup.userToken,
+        encryptionKey: pinSetup.encryptionKey,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        sdk.execute(pinSetup.challengeId, (err) => {
+          if (err) reject(err instanceof Error ? err : new Error("PIN setup failed."));
+          else resolve();
+        });
+      });
+
+      const confirmRes = await fetch("/api/wallet/confirm", { method: "POST" });
+      if (!confirmRes.ok) throw new Error("Couldn't finish setting up your wallet.");
+      setPinSetup(null);
+      setWalletReady(true);
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : "Something went wrong setting up your PIN.");
+    } finally {
+      setPinSettingUp(false);
+    }
+  }
 
   async function handleClaim(e: FormEvent) {
     e.preventDefault();
@@ -238,6 +328,35 @@ export function ClaimPageClient({ token }: { token: string }) {
           <span>Sign In to Claim Funds</span>
           <ArrowRight className="h-4 w-4" />
         </button>
+      ) : walletReady === null ? (
+        <div className="py-4 text-center text-xs text-zinc-400">Checking your wallet...</div>
+      ) : pinSetup ? (
+        <div className="space-y-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/20 border border-blue-500/30 text-blue-400">
+            <ShieldCheck className="h-6 w-6" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-white">Set up your security PIN</p>
+            <p className="text-xs text-zinc-400">
+              One quick step to activate your wallet, then your {formatUsdc(info.amountMicros)} USDC will be ready to claim.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={setUpPin}
+            disabled={pinSettingUp}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98] disabled:opacity-50"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>{pinSettingUp ? "Setting up…" : "Set Up PIN"}</span>
+          </button>
+          {pinError && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 text-left">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+              <span>{pinError}</span>
+            </div>
+          )}
+        </div>
       ) : (
         <form onSubmit={handleClaim} className="space-y-4">
           {info.hasPassword && (

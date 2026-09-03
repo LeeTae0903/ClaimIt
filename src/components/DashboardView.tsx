@@ -177,6 +177,21 @@ export function DashboardView({
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [withdrawSuccess, setWithdrawSuccess] = useState(false);
 
+  // Proactive PIN setup: previously, a brand-new user only ever discovered
+  // they needed a Circle PIN when Create Loot Link's submit failed with
+  // NO_WALLET and bounced them to a separate /wallet/setup page (losing
+  // whatever they'd typed). Now, /api/wallet/ensure's "pending-pin-setup"
+  // status is surfaced right here as an inline banner, right after sign-in —
+  // so by the time they open Create Loot Link, the PIN is already set up.
+  const [pinSetup, setPinSetup] = useState<{
+    challengeId: string;
+    userToken: string;
+    encryptionKey: string;
+    circleAppId: string;
+  } | null>(null);
+  const [pinSettingUp, setPinSettingUp] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+
   const modalOpen = isCreateModalOpen ?? internalModalOpen;
   const setModalOpen = setIsCreateModalOpen ?? setInternalModalOpen;
 
@@ -205,6 +220,7 @@ export function DashboardView({
       .then(async (data) => {
         if (data.wallet) {
           setUserWallet(data.wallet);
+          setPinSetup(null);
         } else {
           // Auto-ensure wallet if DB table doesn't have it yet
           const ensureRes = await fetch("/api/wallet/ensure", { method: "POST" });
@@ -212,12 +228,62 @@ export function DashboardView({
             const ensureData = await ensureRes.json();
             if (ensureData.status === "ready" && ensureData.wallets?.[0]) {
               setUserWallet(ensureData.wallets[0]);
+            } else if (ensureData.status === "pending-pin-setup") {
+              // Wallet + PIN aren't set up yet — surface the inline banner
+              // now instead of waiting for Create Loot Link to fail with
+              // NO_WALLET. getDeviceId() primes the Circle SDK the same way
+              // WalletSetup.tsx does before its own challenge screen.
+              try {
+                const sdk = getWalletSdk(ensureData.circleAppId);
+                await sdk.getDeviceId();
+                setPinSetup({
+                  challengeId: ensureData.challengeId,
+                  userToken: ensureData.userToken,
+                  encryptionKey: ensureData.encryptionKey,
+                  circleAppId: ensureData.circleAppId,
+                });
+              } catch {
+                // If the SDK can't prime here, the NO_WALLET redirect to
+                // /wallet/setup from CreateLinkForm remains as a fallback.
+              }
             }
           }
         }
       })
       .catch(() => setUserWallet(null));
   }, []);
+
+  async function setUpPin() {
+    if (!pinSetup) return;
+    setPinSettingUp(true);
+    setPinError(null);
+    try {
+      const sdk = getWalletSdk(pinSetup.circleAppId);
+      sdk.setAuthentication({
+        userToken: pinSetup.userToken,
+        encryptionKey: pinSetup.encryptionKey,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        sdk.execute(pinSetup.challengeId, (err) => {
+          if (err) reject(err instanceof Error ? err : new Error("PIN setup failed."));
+          else resolve();
+        });
+      });
+
+      const confirmRes = await fetch("/api/wallet/confirm", { method: "POST" });
+      if (!confirmRes.ok) throw new Error("Couldn't finish setting up your wallet.");
+      const confirmData = await confirmRes.json();
+      if (confirmData.wallets?.[0]) {
+        setUserWallet(confirmData.wallets[0]);
+      }
+      setPinSetup(null);
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : "Something went wrong setting up your PIN.");
+    } finally {
+      setPinSettingUp(false);
+    }
+  }
 
   useEffect(() => {
     fetchDashboardData();
@@ -349,6 +415,36 @@ export function DashboardView({
           </div>
         )}
       </div>
+
+      {/* Proactive PIN Setup Banner — appears right after sign-in, before
+          Create Loot Link would otherwise be interrupted by it. */}
+      {!userWallet && pinSetup && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Set up your security PIN</p>
+              <p className="text-xs text-zinc-400">
+                One quick step to activate your wallet — do it now so Create Loot Link won&apos;t interrupt you later.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-start sm:items-end gap-1.5">
+            <button
+              type="button"
+              onClick={setUpPin}
+              disabled={pinSettingUp}
+              className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-500 transition-all shadow-md active:scale-[0.98] disabled:opacity-50"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>{pinSettingUp ? "Setting up…" : "Set Up PIN"}</span>
+            </button>
+            {pinError && <span className="text-xs text-red-400">{pinError}</span>}
+          </div>
+        </div>
+      )}
 
       {/* Stats Summary Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
