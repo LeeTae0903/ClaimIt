@@ -113,8 +113,17 @@ export function CreateGiveawayForm({ onSuccess }: { onSuccess?: () => void }) {
         });
       });
 
-      await confirmBatchWithRetry(batchId);
-
+      // The deposit is authorized and already moved on-chain at this point
+      // — show the links and their passwords right away. Don't gate this on
+      // confirmBatchWithRetry below: that call is just bookkeeping (marks
+      // our DB rows ACTIVE) and can be slow or time out on Circle's own
+      // indexing lag without the transfer having failed at all. Previously
+      // this reveal only happened after confirm succeeded, so a slow/failed
+      // confirm meant the user never saw their links OR the generated
+      // passwords — and since each password is only ever returned once here
+      // (only its hash is persisted), that made them permanently
+      // unrecoverable even though the money had already moved and the links
+      // worked fine once the background reconciliation job caught up.
       setLinks(
         createdLinks.map((l) => ({
           linkId: l.linkId,
@@ -124,6 +133,12 @@ export function CreateGiveawayForm({ onSuccess }: { onSuccess?: () => void }) {
         })),
       );
       onSuccess?.();
+
+      confirmBatchWithRetry(batchId).catch((err) => {
+        // Best-effort from here — the reconciliation job (or the next
+        // confirm attempt when the user revisits) still catches this.
+        console.error("[CreateGiveawayForm] confirm batch failed, reconciliation job will retry:", err);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

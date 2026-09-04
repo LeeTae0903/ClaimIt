@@ -110,11 +110,26 @@ export function CreateLinkForm({ onSuccess }: { onSuccess?: () => void }) {
         });
       });
 
-      await confirmDepositWithRetry(linkId);
-
+      // The deposit is authorized and already moved on-chain at this point
+      // — show the claim link and password right away. Don't gate this on
+      // confirmDepositWithRetry below: that call is just bookkeeping (marks
+      // our DB row ACTIVE) and can be slow or time out on Circle's own
+      // indexing lag without the transfer having failed at all. Previously
+      // this reveal only happened after confirm succeeded, so a slow/failed
+      // confirm meant the user never saw their link OR their generated
+      // password — and since the password is only ever returned once here
+      // (only its hash is persisted), that made it permanently unrecoverable
+      // even though their money had already moved and the link worked fine
+      // once the background reconciliation job caught up.
       setClaimUrl(`${window.location.origin}/claim/${claimToken}`);
       setRevealedPassword(generatedPassword ?? (password || null));
       onSuccess?.();
+
+      confirmDepositWithRetry(linkId).catch((err) => {
+        // Best-effort from here — the reconciliation job (or the next
+        // confirm attempt when the user revisits) still catches this.
+        console.error("[CreateLinkForm] confirm deposit failed, reconciliation job will retry:", err);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
