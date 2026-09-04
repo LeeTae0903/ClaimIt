@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
@@ -8,11 +8,8 @@ import { signInWithWallet } from "@/lib/wallet/connect";
 import { SocialSignInButton } from "@/components/SocialSignInButton";
 import {
   Gift,
-  Mail,
-  ArrowRight,
   Sparkles,
   AlertCircle,
-  KeyRound,
   ArrowLeft,
   Wallet,
 } from "lucide-react";
@@ -40,22 +37,11 @@ function GoogleIcon() {
   );
 }
 
-function AppleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5 fill-zinc-100" aria-hidden="true">
-      <path d="M16.36 1.4c0 1.14-.42 2.2-1.24 3.06-.85.9-2.13 1.6-3.24 1.5-.13-1.1.44-2.24 1.22-3.02.83-.86 2.28-1.5 3.26-1.54zM20.5 17.1c-.5 1.15-1.1 2.24-2 3.24-.9 1-1.79 1.99-3.2 2.01-1.36.03-1.8-.83-3.36-.83-1.55 0-2.05.8-3.34.86-1.36.05-2.4-1.08-3.31-2.08-1.85-2.05-3.28-5.79-1.37-8.32.94-1.26 2.6-2.06 4.4-2.09 1.32-.02 2.57.9 3.37.9.8 0 2.32-1.11 3.9-.95.66.03 2.53.27 3.73 2.02-.1.06-2.22 1.3-2.2 3.87.03 3.07 2.7 4.1 2.73 4.11-.02.06-.42 1.46-1.35 2.26z" />
-    </svg>
-  );
-}
-
 function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
 
-  const [step, setStep] = useState<"email" | "otp">("email");
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,17 +53,6 @@ function SignInForm() {
       callbackURL: redirectTo,
     });
     if (error) setError(error.message ?? "Google sign-in failed.");
-    setLoading(null);
-  }
-
-  async function withApple() {
-    setError(null);
-    setLoading("apple");
-    const { error } = await authClient.signIn.social({
-      provider: "apple",
-      callbackURL: redirectTo,
-    });
-    if (error) setError(error.message ?? "Apple sign-in failed.");
     setLoading(null);
   }
 
@@ -116,35 +91,6 @@ function SignInForm() {
     router.push(redirectTo);
   }
 
-  async function sendCode(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading("send-otp");
-    const { error } = await authClient.emailOtp.sendVerificationOtp({
-      email,
-      type: "sign-in",
-    });
-    setLoading(null);
-    if (error) {
-      setError(error.message ?? "Couldn't send code.");
-      return;
-    }
-    setStep("otp");
-  }
-
-  async function verifyCode(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading("verify-otp");
-    const { error } = await authClient.signIn.emailOtp({ email, otp });
-    setLoading(null);
-    if (error) {
-      setError(error.message ?? "Invalid or expired code.");
-      return;
-    }
-    router.push(redirectTo);
-  }
-
   return (
     <div className="flex min-h-screen flex-col justify-center bg-zinc-950 px-6 py-12 text-zinc-100">
       <div className="mx-auto w-full max-w-sm space-y-8 rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-8 shadow-2xl backdrop-blur-xl">
@@ -172,79 +118,12 @@ function SignInForm() {
             label="Continue with Google"
           />
           <SocialSignInButton
-            onClick={withApple}
-            disabled={loading !== null}
-            icon={<AppleIcon />}
-            label="Continue with Apple"
-          />
-          <SocialSignInButton
             onClick={withWallet}
             disabled={loading !== null}
             icon={<Wallet className="h-5 w-5 text-blue-400" />}
             label={loading === "wallet" ? "Confirm in your wallet…" : "Continue with wallet"}
           />
         </div>
-
-        <div className="flex items-center gap-3 text-xs uppercase tracking-wider text-zinc-600">
-          <div className="h-px flex-1 bg-zinc-800" />
-          <span>or email</span>
-          <div className="h-px flex-1 bg-zinc-800" />
-        </div>
-
-        {step === "email" ? (
-          <form onSubmit={sendCode} className="space-y-3">
-            <div className="relative">
-              <Mail className="absolute left-3.5 top-3.5 h-5 w-5 text-zinc-500" />
-              <input
-                type="email"
-                required
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 pl-11 pr-4 py-3 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading !== null}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 shadow-md"
-            >
-              <span>{loading === "send-otp" ? "Sending OTP Code…" : "Continue with Email OTP"}</span>
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={verifyCode} className="space-y-3">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400 flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-blue-400 flex-shrink-0" />
-              <span>Code sent to <strong className="text-zinc-200 font-semibold">{email}</strong></span>
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              required
-              placeholder="123456"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-4 py-3.5 text-center text-xl font-mono tracking-[0.3em] text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
-            <button
-              type="submit"
-              disabled={loading !== null}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98] disabled:opacity-50 shadow-md"
-            >
-              <span>{loading === "verify-otp" ? "Verifying Code…" : "Verify & Sign In"}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep("email")}
-              className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Use a different email address
-            </button>
-          </form>
-        )}
 
         {error && (
           <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
