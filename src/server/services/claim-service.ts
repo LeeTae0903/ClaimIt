@@ -14,7 +14,7 @@ export type PublicLinkInfo =
   | { found: false }
   | {
       found: true;
-      status: "claimable" | "claimed" | "expired" | "cancelled";
+      status: "claimable" | "claimed" | "expired" | "cancelled" | "pending";
       amountMicros: string;
       hasPassword: boolean;
     };
@@ -31,24 +31,41 @@ export async function getPublicLinkInfo(token: string): Promise<PublicLinkInfo> 
   });
   if (!link) return { found: false };
 
+  // A link still in PENDING_DEPOSIT hasn't failed or expired — the
+  // sender's on-chain deposit just hasn't finished being confirmed yet
+  // (that confirm call runs in the background *after* the claim link is
+  // already shown to the sender, see CreateLinkForm/CreateGiveawayForm).
+  // Reporting this as "expired" was actively wrong and alarming: anyone
+  // who opened the link within that few-second window saw "Payment Link
+  // Expired" for a link that becomes claimable moments later on its own,
+  // with no code change on the sender's side at all.
+  if (link.status === "PENDING_DEPOSIT") {
+    return {
+      found: true,
+      status: "pending",
+      amountMicros: link.amountMicros.toString(),
+      hasPassword: !!link.passwordHash,
+    };
+  }
+
   const isLazilyExpired =
     link.status === "ACTIVE" && link.expiresAt !== null && link.expiresAt < new Date();
 
   const status = isLazilyExpired
     ? "expired"
     : link.status === "ACTIVE"
-      ? "claimable"
-      : link.status === "CLAIMED"
-        ? "claimed"
-        : link.status === "EXPIRED"
-          ? "expired"
-          : link.status === "CANCELLED"
-            ? "cancelled"
-            : "expired"; // PENDING_DEPOSIT reads as not-yet-claimable
+    ? "claimable"
+    : link.status === "CLAIMED"
+    ? "claimed"
+    : link.status === "EXPIRED"
+    ? "expired"
+    : link.status === "CANCELLED"
+    ? "cancelled"
+    : "expired";
 
   return {
     found: true,
-    status: link.status === "PENDING_DEPOSIT" ? "expired" : status,
+    status,
     amountMicros: link.amountMicros.toString(),
     hasPassword: !!link.passwordHash,
   };
@@ -135,6 +152,12 @@ export async function claimPaymentLink({
     throw new LinkNotClaimableError("This link has expired.");
   }
 
+  if (link.status === "PENDING_DEPOSIT") {
+    throw new LinkNotClaimableError(
+      "This link is still confirming the sender's deposit — try again in a few seconds.",
+    );
+  }
+
   if (link.status !== "ACTIVE") {
     throw new LinkNotClaimableError(`This link is not claimable (${link.status}).`);
   }
@@ -194,7 +217,7 @@ export async function claimPaymentLink({
 
   const treasuryWallet = await db.wallet.findUniqueOrThrow({
     where: { id: link.treasuryWalletId },
-  });  
+  });
   console.error("[claim] treasury wallet:", treasuryWallet.circleWalletId, treasuryWallet.address);
 
   try {

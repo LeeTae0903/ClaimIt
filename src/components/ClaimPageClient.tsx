@@ -22,7 +22,7 @@ type PublicLinkInfo =
   | { found: false }
   | {
       found: true;
-      status: "claimable" | "claimed" | "expired" | "cancelled";
+      status: "claimable" | "claimed" | "expired" | "cancelled" | "pending";
       amountMicros: string;
       hasPassword: boolean;
     };
@@ -82,6 +82,22 @@ export function ClaimPageClient({ token }: { token: string }) {
       .then(setInfo)
       .catch(() => setInfo({ found: false }));
   }, [token]);
+
+  // A link can briefly sit in "pending" right after creation — the
+  // sender's deposit hasn't finished being confirmed on-chain yet, which
+  // usually takes just a few seconds (see claim-service.ts). Poll for the
+  // status to flip instead of leaving the visitor stuck on a "confirming"
+  // screen forever; stops as soon as the status is no longer pending.
+  useEffect(() => {
+    if (!info?.found || info.status !== "pending") return;
+    const id = setInterval(() => {
+      fetch(`/api/links/${token}`)
+        .then((res) => res.json())
+        .then(setInfo)
+        .catch(() => {});
+    }, 2500);
+    return () => clearInterval(id);
+  }, [info, token]);
 
   useEffect(() => {
     if (!session) {
@@ -268,6 +284,24 @@ export function ClaimPageClient({ token }: { token: string }) {
           <p className="text-base font-semibold text-white">Link Already Claimed</p>
           <p className="text-xs text-zinc-400">
             This USDC payment link has already been claimed.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (info.status === "pending") {
+    return (
+      <div className="rounded-3xl border border-zinc-800/80 bg-zinc-900/60 p-12 text-center space-y-4 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 animate-pulse">
+          <ShieldCheck className="h-6 w-6" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-base font-semibold text-white">Confirming Your Loot…</p>
+          <p className="text-xs text-zinc-400">
+            The sender&apos;s deposit is still confirming on-chain — this
+            usually only takes a few seconds. This page updates
+            automatically, no need to refresh.
           </p>
         </div>
       </div>
