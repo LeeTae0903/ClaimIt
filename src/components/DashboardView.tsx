@@ -262,20 +262,27 @@ export function DashboardView({
             } else if (ensureData.status === "pending-pin-setup") {
               // Wallet + PIN aren't set up yet — surface the inline banner
               // now instead of waiting for Create Loot Link to fail with
-              // NO_WALLET. getDeviceId() primes the Circle SDK the same way
-              // WalletSetup.tsx does before its own challenge screen.
+              // NO_WALLET. Show it right away: setUpPin() authenticates and
+              // calls sdk.execute() directly, it does NOT depend on the
+              // getDeviceId() priming below succeeding first — that call is
+              // just a best-effort warm-up for the iframe. Gating the banner
+              // on it meant that whenever priming was slow or blocked (seen
+              // e.g. right after a Google OAuth redirect), the banner never
+              // showed at all and the user was silently left on "Checking
+              // wallet address..." with no way to set up their wallet until
+              // Create Loot Link happened to fail with NO_WALLET.
+              setPinSetup({
+                challengeId: ensureData.challengeId,
+                userToken: ensureData.userToken,
+                encryptionKey: ensureData.encryptionKey,
+                circleAppId: ensureData.circleAppId,
+              });
               try {
                 const sdk = getWalletSdk(ensureData.circleAppId);
                 await withTimeout(sdk.getDeviceId(), 8000);
-                setPinSetup({
-                  challengeId: ensureData.challengeId,
-                  userToken: ensureData.userToken,
-                  encryptionKey: ensureData.encryptionKey,
-                  circleAppId: ensureData.circleAppId,
-                });
               } catch {
-                // If the SDK can't prime here, the NO_WALLET redirect to
-                // /wallet/setup from CreateLinkForm remains as a fallback.
+                // Priming failed/timed out — no problem, setUpPin() still
+                // works fine when the user actually clicks the button.
               }
             }
           }

@@ -97,21 +97,28 @@ export function ClaimPageClient({ token }: { token: string }) {
         if (data.status === "ready") {
           setWalletReady(true);
         } else if (data.status === "pending-pin-setup") {
+          // Show the PIN banner right away — setUpPin() authenticates and
+          // calls sdk.execute() directly, it does NOT depend on the
+          // getDeviceId() priming below succeeding first, that call is only
+          // a best-effort warm-up for the iframe. Gating the banner on it
+          // meant that whenever priming was slow or blocked (seen e.g.
+          // right after a Google OAuth redirect), the user was silently
+          // dropped straight into the claim form with no wallet and no way
+          // to fix it until claiming failed with NO_WALLET.
+          if (cancelled) return;
+          setPinSetup({
+            challengeId: data.challengeId,
+            userToken: data.userToken,
+            encryptionKey: data.encryptionKey,
+            circleAppId: data.circleAppId,
+          });
+          setWalletReady(false);
           try {
             const sdk = getWalletSdk(data.circleAppId);
             await withTimeout(sdk.getDeviceId(), 8000);
-            if (cancelled) return;
-            setPinSetup({
-              challengeId: data.challengeId,
-              userToken: data.userToken,
-              encryptionKey: data.encryptionKey,
-              circleAppId: data.circleAppId,
-            });
-            setWalletReady(false);
           } catch {
-            // Couldn't prime the SDK here — don't block the claim form on
-            // it, the NO_WALLET redirect on submit still catches this.
-            setWalletReady(true);
+            // Priming failed/timed out — no problem, setUpPin() still
+            // works fine when the user actually clicks the button.
           }
         } else {
           setWalletReady(true);
