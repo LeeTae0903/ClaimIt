@@ -61,7 +61,7 @@ function SignInForm() {
     setLoading("wallet");
     try {
       await signInWithWallet();
-      router.push(redirectTo);
+      window.location.href = redirectTo;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Wallet sign-in failed.");
     } finally {
@@ -88,7 +88,7 @@ function SignInForm() {
         return;
       }
     }
-    router.push(redirectTo);
+    window.location.href = redirectTo;
   }
 
   return (
