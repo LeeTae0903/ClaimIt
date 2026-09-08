@@ -2,6 +2,8 @@
 
 Secure USDC payment links on Arc Testnet — deposit, share a link, recipient claims into an auto-created or existing wallet.
 
+**Live app:** [lootclaim.vercel.app](https://lootclaim.vercel.app)
+
 ## Stack
 
 Next.js (App Router) · TypeScript · TailwindCSS · Prisma (Postgres) · Circle Wallets (Developer-Controlled treasury + User-Controlled recipient wallets) · Arc Testnet.
@@ -41,17 +43,21 @@ The Prisma Client is generated into `src/generated/prisma` (gitignored) and re-e
 
 ```
 src/
-  app/            App Router pages, layouts, and API routes (route.ts)
-  components/     Reusable UI components
-  lib/             Cross-cutting utilities (db client, auth config, Circle SDK wrappers, rate limiting)
+  app/         App Router pages, layouts, and API routes (route.ts)
+  components/  Reusable UI components
+  lib/         Cross-cutting utilities (db client, auth config, Circle SDK wrappers, rate limiting)
   server/
-    services/      Business logic (link creation, claim verification, payouts)
-    repositories/  Prisma queries, isolated from route handlers
-  types/           Shared TypeScript types
+    services/     Business logic (link creation, claim verification, payouts)
+    repositories/ Prisma queries, isolated from route handlers
+  types/       Shared TypeScript types
 ```
 
 ## Notes for contributors (and future Claude sessions)
 
 - This project pins to a recent Next.js major version with real breaking changes from older training data — see `AGENTS.md` and `node_modules/next/dist/docs/` before assuming an API (e.g. `proxy.ts`, not `middleware.ts`).
 - Prisma is on a version using driver adapters (`@prisma/adapter-pg`) and `prisma.config.ts` for the datasource — not the older `url = env(...)` schema-only pattern.
-- Arc is Circle's USDC-native L1, currently **testnet only**. See project architecture notes for the escrow/custody model and why gas is deducted from claimed amounts rather than charged to recipients.
+- Arc is Circle's USDC-native L1, currently testnet only. See project architecture notes for the escrow/custody model and why gas is deducted from claimed amounts rather than charged to recipients.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
